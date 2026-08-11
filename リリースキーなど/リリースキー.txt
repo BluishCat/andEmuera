@@ -1,0 +1,5 @@
+Droid_Fuu_sea_5578
+
+
+
+$env:ANDEMUERA_KEYSTORE_PASS = 'Droid_Fuu_sea_5578'; cd D:\egame\era\andEmuera; .\tools\pack.ps1

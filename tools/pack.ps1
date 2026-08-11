@@ -126,9 +126,15 @@ Write-Host ""
 Write-Host ("APK: {0} ({1:N1} MB)" -f $apk.FullName, ($apk.Length / 1MB))
 
 # 署名がデバッグ鍵に落ちていないか見る。落ちたまま配ると、次の版を上書きインストールできない
-$keytool = Get-Command keytool -ErrorAction SilentlyContinue
+#
+# 探索元によって返る型が違う (Get-Command は CommandInfo、Get-ChildItem は FileInfo) ので、
+# 必ずパス文字列に揃える。FileInfo には .Source が無く、& $null で落ちる
+$keytool = $null
+$cmd = Get-Command keytool -ErrorAction SilentlyContinue
+if ($cmd) { $keytool = $cmd.Source }
 if (-not $keytool -and $env:JAVA_HOME) {
-    $keytool = Get-Item (Join-Path $env:JAVA_HOME 'bin\keytool.exe') -ErrorAction SilentlyContinue
+    $item = Get-Item (Join-Path $env:JAVA_HOME 'bin\keytool.exe') -ErrorAction SilentlyContinue
+    if ($item) { $keytool = $item.FullName }
 }
 if (-not $keytool) {
     # make-keystore.ps1 と同じ探索先
@@ -139,12 +145,12 @@ if (-not $keytool) {
         "$env:ProgramFiles\Android\openjdk\*\bin\keytool.exe",
         "$env:ProgramFiles\Eclipse Adoptium\*\bin\keytool.exe",
         "$env:LOCALAPPDATA\Android\Sdk\jdk\*\bin\keytool.exe")) {
-        $keytool = Get-ChildItem $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($keytool) { break }
+        $found = Get-ChildItem $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { $keytool = $found.FullName; break }
     }
 }
 if ($keytool) {
-    $cert = & $keytool.Source -printcert -jarfile $apk.FullName 2>&1 | Out-String
+    $cert = & $keytool -printcert -jarfile $apk.FullName 2>&1 | Out-String
     if ($cert -match 'CN=Android Debug') {
         throw "デバッグ鍵で署名されています。$KeyStore が使われていません。"
     }
