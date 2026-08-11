@@ -42,6 +42,8 @@ function Find-Keytool {
         "$env:ProgramFiles\Java\*\bin\keytool.exe",
         "$env:ProgramFiles\Microsoft\jdk-*\bin\keytool.exe",
         "$env:ProgramFiles\Android\jdk\*\bin\keytool.exe",
+        # Visual Studio の Android ワークロードはこちらに入れる
+        "$env:ProgramFiles\Android\openjdk\*\bin\keytool.exe",
         "$env:ProgramFiles\Eclipse Adoptium\*\bin\keytool.exe",
         "$env:LOCALAPPDATA\Android\Sdk\jdk\*\bin\keytool.exe"
     )

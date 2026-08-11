@@ -131,7 +131,17 @@ if (-not $keytool -and $env:JAVA_HOME) {
     $keytool = Get-Item (Join-Path $env:JAVA_HOME 'bin\keytool.exe') -ErrorAction SilentlyContinue
 }
 if (-not $keytool) {
-    $keytool = Get-ChildItem "$env:ProgramFiles\Java\*\bin\keytool.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    # make-keystore.ps1 と同じ探索先
+    foreach ($pattern in @(
+        "$env:ProgramFiles\Java\*\bin\keytool.exe",
+        "$env:ProgramFiles\Microsoft\jdk-*\bin\keytool.exe",
+        "$env:ProgramFiles\Android\jdk\*\bin\keytool.exe",
+        "$env:ProgramFiles\Android\openjdk\*\bin\keytool.exe",
+        "$env:ProgramFiles\Eclipse Adoptium\*\bin\keytool.exe",
+        "$env:LOCALAPPDATA\Android\Sdk\jdk\*\bin\keytool.exe")) {
+        $keytool = Get-ChildItem $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($keytool) { break }
+    }
 }
 if ($keytool) {
     $cert = & $keytool.Source -printcert -jarfile $apk.FullName 2>&1 | Out-String
@@ -158,26 +168,32 @@ Copy-Item $apk.FullName (Join-Path $stage "andEmuera-$Version.apk")
 # --- ライセンス表示
 $licenseDir = Join-Path $stage 'licenses'
 New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
-Copy-Item (Join-Path $upstreamLicenses 'Emuera.LICENSE.txt')  $licenseDir
 Copy-Item (Join-Path $upstreamLicenses 'LibWebp.LICENSE.txt') $licenseDir
-Copy-Item (Join-Path $repo 'licenses\*.txt') $licenseDir
+# Emuera / Emuera.NET (移植元) の全文は licenses/ に置いてある
+Copy-Item (Join-Path $repo 'licenses\*') $licenseDir
 Copy-Item (Join-Path $repo 'src\andEmuera.Android\Assets\fonts\OFL.txt') $licenseDir
 
 # --- 出典表示 (zlib ライセンスの「改変した旨の明示」はここが本体)
 $notice = @'
 andEmuera {VERSION}
 
-本ソフトウェアは、以下のソフトウェアを改変して作られた Android 移植版です。
+本ソフトウェアは、以下のソフトウェアを改変・統合して作られた Android 移植版です。
 andEmuera の作者はオリジナルの作者ではありません。
 
     Emuera        (MinorShift 氏)      https://ja.osdn.net/projects/emuera/
     Emuera.EM+EE  (EvilMask 氏ほか)    https://gitlab.com/EvilMask/emuera.em
+    Emuera.NET    (VVII 氏ほか)        https://gitlab.com/alnatiyan/EmueraDotNet
 
-    Copyright (C) 2008- MinorShift, 妊）|дﾟ)の中の人
+    Copyright (C) 2008- MinorShift, 妊）|дﾟ)の中の人, VVII
 
-Emuera のライセンス (zlib ライセンス相当) に従い、ソースを改変した旨をここに明示します。
-全文は licenses/Emuera.LICENSE.txt にあります。上流ソースへの変更は、ソース配布物
-andEmuera-{VERSION}-src.zip の patches/ に差分として入っています。
+Emuera / Emuera.NET のライセンス (どちらも zlib ライセンス相当) に従い、
+ソースを改変した旨をここに明示します。全文は licenses/ にあります。
+上流ソースへの変更は、ソース配布物 andEmuera-{VERSION}-src.zip の patches/ に
+差分として入っています。
+
+Emuera.NET からの機能移植は EmueraEX 経由で取り込んでいます。
+
+    https://github.com/BluishCat/EmueraEX
 
 同梱しているもの:
 

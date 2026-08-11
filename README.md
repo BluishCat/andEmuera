@@ -1,21 +1,28 @@
 # andEmuera
 
-era 系ゲームのエンジン **Emuera.EM+EE** を Android で動かすための移植です。
+era 系ゲームのエンジンを Android で動かすための移植です。
 
-Windows 専用だった Emuera.EM+EE（.NET / WinForms）から Windows 依存を切り離し、
+Windows 専用だった **Emuera.EM+EE**（.NET / WinForms）から Windows 依存を切り離し、
 スマートフォン単体で era ゲームを遊べるようにすることを目指しています。
+
+さらに [EmueraEX](https://github.com/BluishCat/EmueraEX) の統合パッチを取り込んでいるため、
+**Emuera.NET（.netEmuera）系のバリアント**（ShinEraTenseiP など）も同じアプリで動きます。
+`MATCHALL` / `GETCSVNOBY*` / `HASH_XXH*` / `DICT_*` / `G_POLYGON_*` / `SQL_*` / `VARI`,`VARS` と
+`HTML_PRINT` の `<div>` 方言に対応しています。
 
 ## これは改変版です
 
 本ソフトウェアは [Emuera](https://ja.osdn.net/projects/emuera/)（MinorShift 氏）および
-その派生である [Emuera.EM+EE](https://gitlab.com/EvilMask/emuera.em) を**改変**したものです。
+その派生である [Emuera.EM+EE](https://gitlab.com/EvilMask/emuera.em)（EvilMask 氏 / Enter 氏）を**改変**したものです。
+さらに [Emuera.NET](https://gitlab.com/alnatiyan/EmueraDotNet)（VVII 氏 / alnatiyan 氏）から
+機能を移植しています（[EmueraEX](https://github.com/BluishCat/EmueraEX) 経由）。
 オリジナルの作者ではありません。
 
-Emuera のライセンス（zlib ライセンス相当、`upstream/emuera.em/Readme/License/Emuera.LICENSE.txt`）に従い、
+Emuera / Emuera.NET のライセンス（どちらも zlib ライセンス相当。全文は [licenses/](licenses/)）に従い、
 改変した旨をここに明示します。上流ソースへの変更は `patches/` に差分として保管しています。
 
 ```
-Copyright (C) 2008- MinorShift, 妊）|дﾟ)の中の人
+Copyright (C) 2008- MinorShift, 妊）|дﾟ)の中の人, VVII
 ```
 
 ## 制作について
