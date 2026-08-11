@@ -26,7 +26,10 @@ param(
     [string]$KeyStore = (Join-Path $env:USERPROFILE '.andemuera\andemuera-release.keystore'),
     [string]$KeyAlias = 'andemuera',
     # ソース zip を作らない
-    [switch]$SkipSource
+    [switch]$SkipSource,
+    # ビルドし直さず、publish に残っている署名済み APK をそのまま使う。
+    # 署名は済んでいるので鍵もパスワードも要らない (デバッグ鍵でないかは下で確認する)
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,19 +81,21 @@ if (-not (Test-Path $upstreamLicenses)) {
 "@
 }
 
-if (-not (Test-Path $KeyStore)) {
-    throw @"
+if (-not $SkipBuild) {
+    if (-not (Test-Path $KeyStore)) {
+        throw @"
 署名鍵がありません: $KeyStore
 先に作ってください:
     .\tools\make-keystore.ps1
 "@
-}
+    }
 
-if (-not (Get-Item "env:$passVar" -ErrorAction SilentlyContinue)) {
-    throw @"
+    if (-not (Get-Item "env:$passVar" -ErrorAction SilentlyContinue)) {
+        throw @"
 環境変数 $passVar が設定されていません。鍵のパスワードを入れてください:
     `$env:$passVar = '<鍵のパスワード>'
 "@
+    }
 }
 
 [xml]$proj = Get-Content $csproj
@@ -100,22 +105,27 @@ $appId          = $proj.SelectSingleNode('//PropertyGroup/ApplicationId').InnerT
 if (-not $Version) { $Version = $displayVersion }
 
 Write-Host "andEmuera $Version (versionCode $versionCode)" -ForegroundColor Cyan
-Write-Host "署名鍵: $KeyStore (alias: $KeyAlias)"
+if (-not $SkipBuild) { Write-Host "署名鍵: $KeyStore (alias: $KeyAlias)" }
 Write-Host ""
 
 # ---------------------------------------------------------------- ビルド
 
-Write-Host "Release ビルド中…" -ForegroundColor Cyan
+if ($SkipBuild) {
+    Write-Host "ビルドを飛ばして、publish に残っている APK を使います。" -ForegroundColor Yellow
+}
+else {
+    Write-Host "Release ビルド中…" -ForegroundColor Cyan
 
-# パスワードは env: 参照で渡す。コマンドラインに実物を載せるとプロセス一覧から見える
-& dotnet publish $csproj -c Release -f net10.0-android `
-    -p:AndroidKeyStore=true `
-    "-p:AndroidSigningKeyStore=$KeyStore" `
-    "-p:AndroidSigningKeyAlias=$KeyAlias" `
-    "-p:AndroidSigningStorePass=env:$passVar" `
-    "-p:AndroidSigningKeyPass=env:$passVar" `
-    -v minimal
-if ($LASTEXITCODE -ne 0) { throw "ビルドに失敗しました (終了コード $LASTEXITCODE)。" }
+    # パスワードは env: 参照で渡す。コマンドラインに実物を載せるとプロセス一覧から見える
+    & dotnet publish $csproj -c Release -f net10.0-android `
+        -p:AndroidKeyStore=true `
+        "-p:AndroidSigningKeyStore=$KeyStore" `
+        "-p:AndroidSigningKeyAlias=$KeyAlias" `
+        "-p:AndroidSigningStorePass=env:$passVar" `
+        "-p:AndroidSigningKeyPass=env:$passVar" `
+        -v minimal
+    if ($LASTEXITCODE -ne 0) { throw "ビルドに失敗しました (終了コード $LASTEXITCODE)。" }
+}
 
 $publishDir = Join-Path $repo 'src\andEmuera.Android\bin\Release\net10.0-android\publish'
 $apk = Get-ChildItem $publishDir -Filter '*-Signed.apk' -ErrorAction SilentlyContinue |
@@ -231,6 +241,11 @@ Set-Content -Path (Join-Path $stage 'NOTICE.txt') -Value $notice -Encoding utf8
 $readme = @'
 andEmuera {VERSION}
 Android で era ゲーム (Emuera) を遊ぶためのアプリです。
+
+Emuera.EM+EE 系のバリアントに加えて、Emuera.NET (.netEmuera) 系のバリアント
+(ShinEraTenseiP など) も同じアプリで動きます。MATCHALL / GETCSVNOBY* /
+HASH_XXH* / DICT_* / G_POLYGON_* / SQL_* / VARI,VARS と HTML_PRINT の <div>
+方言に対応しているためです (EmueraEX の統合パッチを取り込んでいます)。
 
 
 == 1. アプリを入れる ==

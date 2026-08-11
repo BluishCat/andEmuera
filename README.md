@@ -106,12 +106,20 @@ dotnet build src/andEmuera.Android/andEmuera.Android.csproj -t:Install
 （利用者がアンインストールするしかなくなり、セーブも消えます）。必ずバックアップしてください。
 
 ```powershell
-$env:ANDEMUERA_KEYSTORE_PASS = '<鍵のパスワード>'
+$env:ANDEMUERA_KEYSTORE_PASS = Read-Host '鍵のパスワード'
 .\tools\pack.ps1
 ```
 
 パスワードは MSBuild へ変数名のまま (`env:ANDEMUERA_KEYSTORE_PASS`) 渡すので、
-プロセス一覧やビルドログには出ません。
+プロセス一覧やビルドログには出ません。`Read-Host` で受けるのは、コマンド履歴に
+平文で残さないためです。
+
+一度ビルドしたあとで zip の中身だけ作り直すときは `-SkipBuild` を付けます。
+署名済み APK をそのまま使うので、鍵もパスワードも要りません。
+
+```powershell
+.\tools\pack.ps1 -SkipBuild
+```
 
 **リリースのたびに `andEmuera.Android.csproj` の `ApplicationVersion`（versionCode）を +1 してください。**
 これを上げないと、端末側が更新版と認識しません。表示用の版は `ApplicationDisplayVersion` です。
