@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <ApplicationId>rip.eragames.andemuera</ApplicationId>
+    <ApplicationVersion>2</ApplicationVersion>
+    <ApplicationDisplayVersion>0.2</ApplicationDisplayVersion>
+    <RootNamespace>AndEmuera</RootNamespace>
+
+    <!--
+      Emuera は識別子の解決やプラグイン機構でリフレクションを多用するため、
+      トリミングすると実行時に落ちる。Release でも無効にしておく。
+    -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <AndroidLinkMode>None</AndroidLinkMode>
+    <!-- Release の既定は AOT だが、AOT はトリミング前提 (XA1030) なので上と両立しない -->
+    <RunAOTCompilation>false</RunAOTCompilation>
+  </PropertyGroup>
+
+  <!--
+    配布物 (tools/pack.ps1) の出力。サイドロード配布なので AAB ではなく APK を出す。
+
+    RID は arm64 だけにする。トリミングを切っている (上の PublishTrimmed) ため
+    1 RID あたり lib/ が 24 MB 前後あり、armeabi-v7a を足すと APK が 27 MB → 51 MB になる。
+    32 bit 専用の ARM 端末はもう出回っていないので、そのぶんを配布サイズに回す。
+    必要なら android-arm を足す (x86 / x64 はエミュレータ用)。
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <RuntimeIdentifiers>android-arm64</RuntimeIdentifiers>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <AndroidPackageFormats>apk</AndroidPackageFormats>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Emuera.WebHost\Emuera.WebHost.csproj" />
+    <!-- Emuera.Core は非依存 TFM なので、Android 向けの Skia ネイティブライブラリはここで入れる -->
+    <PackageReference Include="SkiaSharp" Version="3.119.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Android" Version="3.119.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/andEmuera.Android/andEmuera.Android.csproj" />
+    <Project Path="src/Emuera.Core/Emuera.Core.csproj" />
+    <Project Path="src/Emuera.TestHarness/Emuera.TestHarness.csproj" />
+    <Project Path="src/Emuera.WebHost/Emuera.WebHost.csproj" />
+  </Folder>
+</Solution>

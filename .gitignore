@@ -1,0 +1,14 @@
+# 上流は README の手順で clone する。改変は patches/ に置く
+/upstream/
+
+# 配布物 (tools/pack.ps1 の出力)
+/dist/
+
+# ビルド生成物
+[Bb]in/
+[Oo]bj/
+*.user
+
+# 署名鍵は %USERPROFILE%\.andemuera\ に置く。ここには入れない
+*.keystore
+*.jks
