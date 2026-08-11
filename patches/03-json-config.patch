@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: emuera-unify <unify@localhost>
+From 558c2c3d6d0362e63994e4d755d70ef900afdefd Mon Sep 17 00:00:00 2001
+From: BluishCat <175175076+BluishCat@users.noreply.github.com>
 Date: Tue, 11 Aug 2026 12:04:43 +0900
-Subject: [PATCH 04/13] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20setting.json?=
+Subject: [PATCH 04/15] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20setting.json?=
  =?UTF-8?q?=E3=81=AE.netEmuera=E7=94=B1=E6=9D=A5=E3=82=AD=E3=83=BC?=
  =?UTF-8?q?=E3=82=92=E8=BF=BD=E5=8A=A0=E3=81=97UseRenameInCharaCSV?=
  =?UTF-8?q?=E3=82=92=E5=AE=9F=E8=A3=85?=
@@ -83,3 +83,6 @@ index 4aab601..4293155 100644
  		if (!eReader.OpenOnCache(csvPath, csvName))
  		{
  			output.PrintError(string.Format(trerror.FailedOpenFile.Text, eReader.Filename));
+-- 
+2.51.0.windows.1
+

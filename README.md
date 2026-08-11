@@ -121,6 +121,15 @@ $env:ANDEMUERA_KEYSTORE_PASS = Read-Host '鍵のパスワード'
 .\tools\pack.ps1 -SkipBuild
 ```
 
+**`pack.ps1`（`dotnet publish`）を実行したあとに `dotnet build` すると、`obj/Release` を
+共有しているせいで起動できない APK ができます。** 起動直後に
+
+```
+java.lang.UnsatisfiedLinkError: No implementation found for void ...MainActivity.n_onCreate
+```
+
+で落ちたらこれです。`src/*/bin` と `src/*/obj` を消してビルドし直してください。
+
 **リリースのたびに `andEmuera.Android.csproj` の `ApplicationVersion`（versionCode）を +1 してください。**
 これを上げないと、端末側が更新版と認識しません。表示用の版は `ApplicationDisplayVersion` です。
 

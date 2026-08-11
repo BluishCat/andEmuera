@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: emuera-unify <unify@localhost>
+From df730177370b8a3a3191cf283a9ed8430e3f69a2 Mon Sep 17 00:00:00 2001
+From: BluishCat <175175076+BluishCat@users.noreply.github.com>
 Date: Tue, 11 Aug 2026 16:47:07 +0900
-Subject: [PATCH 12/13] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20=E7=94=9F=E3=82=AD?=
+Subject: [PATCH 12/15] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20=E7=94=9F=E3=82=AD?=
  =?UTF-8?q?=E3=83=BC=E5=85=A5=E5=8A=9B=E5=BE=85=E3=81=A1(INPUTMOUSEKEY)?=
  =?UTF-8?q?=E3=81=A7=E3=82=82=E3=83=91=E3=83=83=E3=83=89=E3=82=92=E5=8A=B9?=
  =?UTF-8?q?=E3=81=8B=E3=81=9B=E3=82=8B?=
@@ -54,3 +54,6 @@ index 883d57e..7306f39 100644
  		/// <summary>
  		/// 決定。マウス左クリックと同じ経路に流す。
  		/// 選択中ボタンがあればその入力値を、無ければ単なる改行待ちの解除として扱う。
+-- 
+2.51.0.windows.1
+

@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: emuera-unify <unify@localhost>
+From 4c0c59645a2827ccdd198d2799741fa58936a848 Mon Sep 17 00:00:00 2001
+From: BluishCat <175175076+BluishCat@users.noreply.github.com>
 Date: Tue, 11 Aug 2026 12:15:31 +0900
-Subject: [PATCH 05/13] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20VARI/VARS=E3=81=AE?=
+Subject: [PATCH 05/15] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20VARI/VARS=E3=81=AE?=
  =?UTF-8?q?=E5=BC=95=E6=95=B0=E8=A7=A3=E6=9E=90=E3=82=92=E9=81=85=E5=BB=B6?=
  =?UTF-8?q?=E3=81=95=E3=81=9BMETHOD=5FSAFE=E3=82=92=E4=BB=98=E4=B8=8E?=
 MIME-Version: 1.0
@@ -255,3 +255,6 @@ index bec5b21..9d40ea0 100644
  		}
  	}
  	#endregion
+-- 
+2.51.0.windows.1
+

@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: emuera-unify <unify@localhost>
+From 25d53eab5c4286cce16384dcedc2abbcb1494b1c Mon Sep 17 00:00:00 2001
+From: BluishCat <175175076+BluishCat@users.noreply.github.com>
 Date: Tue, 11 Aug 2026 12:04:25 +0900
-Subject: [PATCH 03/13] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20GETCSVNOBY*/HASH=5F?=
+Subject: [PATCH 03/15] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20GETCSVNOBY*/HASH=5F?=
  =?UTF-8?q?XXH3/HASH=5FXXH32=20=E3=82=92.netEmuera=E3=81=8B=E3=82=89?=
  =?UTF-8?q?=E7=A7=BB=E6=A4=8D?=
 MIME-Version: 1.0
@@ -177,3 +177,6 @@ index ab3d2c5..7188e70 100644
  
  			//汎用処理系
  			["VARSIZE"] = new VarsizeMethod(),
+-- 
+2.51.0.windows.1
+

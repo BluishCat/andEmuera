@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: emuera-unify <unify@localhost>
+From 4f8b386371d8dde6265dd8e76fcfdb617b8ea21d Mon Sep 17 00:00:00 2001
+From: BluishCat <175175076+BluishCat@users.noreply.github.com>
 Date: Tue, 11 Aug 2026 13:26:19 +0900
-Subject: [PATCH 07/13] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20=E3=82=B2=E3=83=BC?=
+Subject: [PATCH 07/15] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20=E3=82=B2=E3=83=BC?=
  =?UTF-8?q?=E3=83=A0=E3=83=91=E3=83=83=E3=83=89(XInput)=E3=81=A7=E3=83=9C?=
  =?UTF-8?q?=E3=82=BF=E3=83=B3=E9=81=B8=E6=8A=9E=E3=81=A8=E6=B1=BA=E5=AE=9A?=
  =?UTF-8?q?=E3=81=8C=E3=81=A7=E3=81=8D=E3=82=8B=E3=82=88=E3=81=86=E3=81=AB?=
@@ -447,3 +447,6 @@ index 0000000..25b6aa6
 +	/// <summary>パッドで操作できる状態か</summary>
 +	public bool CanUseGamePadSelection => state == ConsoleState.WaitInput && inputReq != null && inputReq.NeedValue;
 +}
+-- 
+2.51.0.windows.1
+

@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: emuera-unify <unify@localhost>
+From 124e560cd5b1367ad7ab2580e22d64494e363665 Mon Sep 17 00:00:00 2001
+From: BluishCat <175175076+BluishCat@users.noreply.github.com>
 Date: Tue, 11 Aug 2026 16:35:36 +0900
-Subject: [PATCH 11/13] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20=E3=83=91=E3=83=83?=
+Subject: [PATCH 11/15] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20=E3=83=91=E3=83=83?=
  =?UTF-8?q?=E3=83=89=E3=81=AE=E4=B8=8A=E4=B8=8B=E5=B7=A6=E5=8F=B3=E3=82=92?=
  =?UTF-8?q?=E7=94=BB=E9=9D=A2=E4=B8=8A=E3=81=AE=E4=BD=8D=E7=BD=AE=E3=81=A7?=
  =?UTF-8?q?=E5=8B=95=E3=81=8B=E3=81=97=E3=80=81div=E5=86=85=E3=81=AE?=
@@ -233,3 +233,6 @@ index 25b6aa6..eebb166 100644
  	}
  
  	/// <summary>選択カーソルを外す</summary>
+-- 
+2.51.0.windows.1
+

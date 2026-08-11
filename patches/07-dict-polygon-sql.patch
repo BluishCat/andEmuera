@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: emuera-unify <unify@localhost>
+From 7d69f165c69448469f4811de4116ff88c6a8e8d9 Mon Sep 17 00:00:00 2001
+From: BluishCat <175175076+BluishCat@users.noreply.github.com>
 Date: Tue, 11 Aug 2026 13:50:04 +0900
-Subject: [PATCH 08/13] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20DICT=5F*/G=5FPOLYGO?=
+Subject: [PATCH 08/15] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20DICT=5F*/G=5FPOLYGO?=
  =?UTF-8?q?N=5F*/SQL=5F*=20=E3=82=92.netEmuera=E3=81=8B=E3=82=89=E7=A7=BB?=
  =?UTF-8?q?=E6=A4=8D?=
 MIME-Version: 1.0
@@ -758,3 +758,6 @@ index 5765db3..7105c4c 100644
  	#region EE_GDRAWLINE
  	public void GDrawLine(int fromX, int fromY, int forX, int forY)
  	{
+-- 
+2.51.0.windows.1
+

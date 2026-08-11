@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: emuera-unify <unify@localhost>
+From 791d7ff3212749b285baf5da288d37110c661c12 Mon Sep 17 00:00:00 2001
+From: BluishCat <175175076+BluishCat@users.noreply.github.com>
 Date: Tue, 11 Aug 2026 12:03:59 +0900
-Subject: [PATCH 02/13] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20MATCHALL=E5=91=BD?=
+Subject: [PATCH 02/15] =?UTF-8?q?=E7=B5=B1=E5=90=88:=20MATCHALL=E5=91=BD?=
  =?UTF-8?q?=E4=BB=A4=E3=82=92.netEmuera=E3=81=8B=E3=82=89=E7=A7=BB?=
  =?UTF-8?q?=E6=A4=8D?=
 MIME-Version: 1.0
@@ -313,3 +313,6 @@ index 0000000..1f73db8
 +		}
 +	}
 +}
+-- 
+2.51.0.windows.1
+
