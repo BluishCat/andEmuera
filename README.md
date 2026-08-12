@@ -114,12 +114,33 @@ $env:ANDEMUERA_KEYSTORE_PASS = Read-Host '鍵のパスワード'
 プロセス一覧やビルドログには出ません。`Read-Host` で受けるのは、コマンド履歴に
 平文で残さないためです。
 
+毎回入れるのが面倒なら、暗号化して置いておけます。最初の 1 回だけ:
+
+```powershell
+.\tools\save-keystore-pass.ps1
+```
+
+`%USERPROFILE%\.andemuera\pass.dpapi` に DPAPI で暗号化して保存します。以降は
+
+```powershell
+.\tools\pack-signed.ps1
+```
+
+で済みます。復号した平文はこのプロセスの環境変数にだけ入り、終わったら消えるので、
+他のプロセスからは見えません。DPAPI はユーザ＋マシン単位なので、ファイルを持ち出しても
+復号できません。逆に OS の再インストールや別ユーザへの移行では読めなくなるので、
+**鍵のパスワードそのものの控えは別に残してください**。
+
 一度ビルドしたあとで zip の中身だけ作り直すときは `-SkipBuild` を付けます。
 署名済み APK をそのまま使うので、鍵もパスワードも要りません。
 
 ```powershell
 .\tools\pack.ps1 -SkipBuild
 ```
+
+`-SkipBuild` は `publish` に残っている APK をそのまま包みます。版を上げたあとや
+ビルドが失敗したあとに使うと、**前の版の APK に新しい版の名前が付いた配布物**が
+できてしまうので、APK が `csproj` より古い場合はエラーで止まります。
 
 **`pack.ps1`（`dotnet publish`）を実行したあとに `dotnet build` すると、`obj/Release` を
 共有しているせいで起動できない APK ができます。** 起動直後に
