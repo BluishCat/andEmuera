@@ -132,6 +132,18 @@ $apk = Get-ChildItem $publishDir -Filter '*-Signed.apk' -ErrorAction SilentlyCon
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $apk) { throw "署名済み APK が見つかりません: $publishDir" }
 
+# 版を上げたあとに -SkipBuild を使うと、前の版の APK に新しい版の名前が付いた
+# 配布物ができてしまう。ビルドが失敗して古い APK が残っている場合も同じ。
+# csproj より古い APK は使わせない
+if ($SkipBuild -and $apk.LastWriteTimeUtc -lt (Get-Item $csproj).LastWriteTimeUtc) {
+    throw @"
+publish に残っている APK が csproj より古いです。中身が今の版と合いません。
+    APK   : $($apk.LastWriteTime)
+    csproj: $((Get-Item $csproj).LastWriteTime)
+-SkipBuild を外してビルドし直してください。
+"@
+}
+
 Write-Host ""
 Write-Host ("APK: {0} ({1:N1} MB)" -f $apk.FullName, ($apk.Length / 1MB))
 
