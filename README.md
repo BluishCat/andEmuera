@@ -8,7 +8,7 @@ Windows 専用だった **Emuera.EM+EE**（.NET / WinForms）から Windows 依�
 さらに [EmueraEX](https://github.com/BluishCat/EmueraEX) の統合パッチを取り込んでいるため、
 **Emuera.NET（.netEmuera）系のバリアント**（ShinEraTenseiP など）も同じアプリで動きます。
 `MATCHALL` / `GETCSVNOBY*` / `HASH_XXH*` / `DICT_*` / `G_POLYGON_*` / `SQL_*` / `VARI`,`VARS` と
-`HTML_PRINT` の `<div>` 方言に対応しています。
+`HTML_PRINT` の `<div>` 方言・`<font size>` に対応しています。
 
 ## これは改変版です
 
@@ -78,7 +78,7 @@ dotnet build src/andEmuera.Android/andEmuera.Android.csproj -t:Install
 
 統合パッチにより、.netEmuera 系のバリアント（ShinEraTenseiP など）も動きます。
 `MATCHALL` / `GETCSVNOBY*` / `HASH_XXH*` / `DICT_*` / `G_POLYGON_*` / `SQL_*` / `VARI`,`VARS` と
-`HTML_PRINT` の `<div>` 方言に対応しています。
+`HTML_PRINT` の `<div>` 方言・`<font size>` に対応しています。
 
 - `SQL_*` は `SQLitePCLRaw.bundle_e_sqlite3` が Android のネイティブ SQLite を持ってきます
 - `G_POLYGON_*` は `Compat/Drawing/Graphics.cs` の `DrawPolygon`/`FillPolygon`（SkiaSharp 裏打ち）で動きます
