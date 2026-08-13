@@ -46,7 +46,8 @@ static class Harness
 			Console.Error.WriteLine("        Emuera.TestHarness --selftest-scroll");
 			Console.Error.WriteLine("        Emuera.TestHarness --selftest-draw");
 			Console.Error.WriteLine("        Emuera.TestHarness --selftest-font <ゲームフォルダ> [--font-fallback <フォント.ttf>]");
-			Console.Error.WriteLine("        Emuera.TestHarness --selftest-glyph <ゲームフォルダ>");
+			Console.Error.WriteLine("        Emuera.TestHarness --selftest-glyph <ゲームフォルダ> [--font-fallback <フォント.ttf>]");
+			Console.Error.WriteLine("        Emuera.TestHarness --dump-halfwidth [フォント名]");
 			Console.Error.WriteLine("        Emuera.TestHarness --verify-encoders <ゲームフォルダ> [--input <文字列>]...");
 			Console.Error.WriteLine("        Emuera.TestHarness --bench <ゲームフォルダ> [--input <文字列>]...");
 			Console.Error.WriteLine("        Emuera.TestHarness <ゲームフォルダ> --capture <出力フォルダ> [--input <文字列>]...");
@@ -78,12 +79,24 @@ static class Harness
 		{
 			if (args.Length < 2)
 			{
-				Console.Error.WriteLine("使い方: Emuera.TestHarness --selftest-glyph <ゲームフォルダ> [--shot <出力.png>]");
+				Console.Error.WriteLine("使い方: Emuera.TestHarness --selftest-glyph <ゲームフォルダ> [--shot <出力.png>] [--font-fallback <フォント.ttf>]");
 				return 1;
 			}
 			int shotAt = Array.IndexOf(args, "--shot");
-			return SelfTestGlyph(args[1], shotAt >= 0 && shotAt + 1 < args.Length ? args[shotAt + 1] : null);
+			// --font-fallback があれば「端末を再現する」モード。PC の MS ゴシックを使わせない。
+			// パスを省いたときは APK 同梱フォントを探す (--selftest-font と同じ流儀)
+			int glyphFallbackAt = Array.IndexOf(args, "--font-fallback");
+			bool deviceMode = glyphFallbackAt >= 0;
+			string? glyphFallbackPath = deviceMode && glyphFallbackAt + 1 < args.Length
+									 && !args[glyphFallbackAt + 1].StartsWith("--")
+				? args[glyphFallbackAt + 1] : null;
+			return SelfTestGlyph(args[1],
+				shotAt >= 0 && shotAt + 1 < args.Length ? args[shotAt + 1] : null,
+				deviceMode, glyphFallbackPath);
 		}
+
+		if (args[0] == "--dump-halfwidth")
+			return DumpHalfWidth(args.Length > 1 ? args[1] : "MS Gothic");
 
 		if (args[0] == "--compare")
 		{
@@ -853,7 +866,7 @@ static class Harness
 	/// あわせて「代替へ回しても桁が動かない」ことを確かめる — 送り幅が主フォントの
 	/// 半角/全角セルちょうどで、前後の文字の位置を 1px も動かさないこと。
 	/// </summary>
-	static int SelfTestGlyph(string gameDir, string? shotPath)
+	static int SelfTestGlyph(string gameDir, string? shotPath, bool deviceMode = false, string? fontFallbackPath = null)
 	{
 		if (!Directory.Exists(gameDir))
 		{
@@ -861,12 +874,24 @@ static class Harness
 			return 1;
 		}
 
-		var font = EmueraEngine.ResolveDefaultFont(gameDir);
+		// PC には MS ゴシックが入っているため、そのままでは本文フォントがそちらに解決され、
+		// 実機で代替へ回る字が代替へ回らない = この検査が素通りする。
+		// 端末を再現するには OS のフォントを切って APK 同梱フォントを受け皿に据える
+		string? fallback = deviceMode ? fontFallbackPath ?? FindBundledFont() : null;
+		if (deviceMode && fallback == null)
+		{
+			Console.Error.WriteLine("受け皿にするフォントが見つかりません (--font-fallback <フォント.ttf> で指定してください)");
+			return 1;
+		}
+
+		var font = EmueraEngine.ResolveDefaultFont(gameDir, useSystemFonts: !deviceMode, fallbackFontPath: fallback);
 		if (font == null)
 		{
 			Console.Error.WriteLine("本文フォントを解決できませんでした");
 			return 1;
 		}
+		if (deviceMode)
+			Console.WriteLine($"端末を再現: OS のフォントを使わず、受け皿は {Path.GetFileName(fallback)}");
 
 		float half = Advance(" ", font);
 		float full = Advance("　", font);
@@ -921,10 +946,13 @@ static class Harness
 			string s = char.ConvertFromUtf32(codePoint);
 			string label = $"U+{codePoint:X4} {s}";
 
-			// 送り幅は半角セルか全角セルちょうど。ここがずれると PRINTC の桁が動く
+			// 送り幅は MS ゴシックと同じ側のセルちょうど。
+			// セルちょうどでないと桁が動き、セルの選び方が MS ゴシックと違うと
+			// スクリプトが組んだ桁数と食い違う (どちらも罫線の枠を崩す)
 			float w = Advance(s, font);
-			ng += Check($"{label} の送り幅がセルちょうど",
-				Near(w, half) || Near(w, full), $"{w}px (半角 {half} / 全角 {full})");
+			bool wantHalf = System.Drawing.MsGothicWidths.IsHalfWidth(codePoint);
+			ng += Check($"{label} の送り幅が MS ゴシックと同じ{(wantHalf ? "半角" : "全角")}セル",
+				Near(w, wantHalf ? half : full), $"{w}px (半角 {half} / 全角 {full})");
 
 			// 前後の文字を押しのけない = 幅が素直に加算される
 			float mixed = Advance("あ" + s + "い", font);
@@ -935,6 +963,12 @@ static class Harness
 		// 欠けの無い文字列は従来どおりの経路 (等幅のまま) で測られる
 		ng += Check("欠けの無い文字列は等幅のまま", Near(Advance("あいうえお", font), full * 5),
 			$"{Advance("あいうえお", font)}px / 全角 5 個 {full * 5}px");
+
+		// ステータスバーに使う ▋ が半角に収まること。MS ゴシックは 0.5em で持つが、
+		// 端末のフォントは全角で持つため、そのまま代替すると 1 本ごとに半角 1 桁ぶん行が伸びて
+		// 罫線で組んだ枠が右へずれる (ShinEraTenseiP の素質選択画面がこれで崩れていた)
+		ng += Check("▋ U+258B が半角セル", Near(Advance("▋", font), half),
+			$"{Advance("▋", font)}px (半角 {half} / 全角 {full})");
 
 		if (shotPath != null)
 		{
@@ -994,6 +1028,50 @@ static class Harness
 		}
 
 		bmp.Save(path);
+	}
+
+	/// <summary>
+	/// そのフォントが半角で持つコードポイントを範囲に畳んで吐く。
+	/// <c>System.Drawing.MsGothicWidths</c> の表を手書きせずに作り直すためのもので、
+	/// 出力をそのまま貼れる C# の配列リテラルにしてある (診断は stderr、表は stdout)。
+	///
+	/// era のスクリプトは MS ゴシックの半角/全角の分け方で桁を組んでいるため、
+	/// 端末側の代替グリフもこの表に合わせないと罫線で組んだ枠が崩れる。
+	/// </summary>
+	static int DumpHalfWidth(string familyName)
+	{
+		// em = 1000 で測る。半角なら 500、全角なら 1000 になる
+		const float Em = 1000f;
+		using var family = new System.Drawing.FontFamily(familyName);
+		using var font = new System.Drawing.Font(family, Em, System.Drawing.FontStyle.Regular,
+												 System.Drawing.GraphicsUnit.Pixel);
+		Console.Error.WriteLine($"指定 {familyName} / 実際 {font.FontFamily.Name}");
+
+		var half = new List<int>();
+		for (int cp = 0; cp <= 0xFFFF; cp++)
+		{
+			// 制御文字は字として出ないので表に入れても意味がない
+			if (char.IsSurrogate((char)cp) || char.IsControl((char)cp))
+				continue;
+			if (!System.Drawing.GlyphFallback.Covers(font, cp))
+				continue;
+			if (Advance(((char)cp).ToString(), font) < Em * 0.6f)
+				half.Add(cp);
+		}
+
+		var sb = new System.Text.StringBuilder();
+		int count = 0;
+		for (int i = 0; i < half.Count; i++)
+		{
+			int start = half[i], end = start;
+			while (i + 1 < half.Count && half[i + 1] == end + 1)
+				end = half[++i];
+			sb.Append($"0x{start:X4}, 0x{end:X4},");
+			sb.Append(++count % 4 == 0 ? Environment.NewLine : " ");
+		}
+		Console.Error.WriteLine($"半角 {half.Count} 文字 / {count} 範囲");
+		Console.WriteLine(sb.ToString().TrimEnd());
+		return 0;
 	}
 
 	static float Advance(string text, System.Drawing.Font font)

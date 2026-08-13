@@ -271,7 +271,10 @@ namespace System.Drawing
 		/// <summary>
 		/// 欠けた 1 文字を代替フェイスで描く。送り幅は主フォントの半角セル 1 個か 2 個。
 		///
-		/// どちらにするかは代替グリフ本来の送り幅で決める。EAW の表で決め打つより
+		/// どちらにするかは、まず MS ゴシックの分け方 (<see cref="MsGothicWidths"/>) を見る。
+		/// era のスクリプトは Windows の既定フォントの幅で桁を組んでいるので、
+		/// 端末のフォントが全角で持っている字でもそちらへ合わせないと枠が崩れる。
+		/// 表に無い字は代替グリフ本来の送り幅で決める。EAW の表で決め打つより
 		/// 見た目が素直で (漢字が半角に潰れない・記号が全角に間延びしない)、
 		/// 計測と描画で同じ判定を通すので幅は必ず一致する。
 		/// </summary>
@@ -284,7 +287,8 @@ namespace System.Drawing
 
 			var substitute = FontFor(face, font);
 			float natural = substitute.MeasureText(ch);
-			float cell = natural <= half * HalfCellTolerance ? half : half * 2f;
+			float cell = MsGothicWidths.IsHalfWidth(codePoint) ? half
+					   : natural <= half * HalfCellTolerance ? half : half * 2f;
 			// セルからはみ出す字だけ横に詰める (Save/Translate/Scale なので
 			// 共有キャッシュした SKFont を書き換えずに済む = スレッド安全)
 			float scale = natural > cell ? cell / natural : 1f;
