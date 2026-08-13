@@ -25,7 +25,7 @@ index f02388d..2070a81 100644
          <Version>1.824.0</Version>
 -        <InformationalVersion>1.824+v24+EMv18+EEv56</InformationalVersion>
 +        <!-- 統合: ベース(EM+EE)の版に、統合レイヤの版 EXvN を足す。パッチを増やしたら上げる -->
-+        <InformationalVersion>1.824+v24+EMv18+EEv56+EXv6</InformationalVersion>
++        <InformationalVersion>1.824+v24+EMv18+EEv56+EXv7</InformationalVersion>
          <Copyright>Copyright (C) 2008- MinorShift, 妊）|дﾟ)の中の人</Copyright>
      </PropertyGroup>
  
