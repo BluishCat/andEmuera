@@ -316,7 +316,15 @@ namespace MinorShift.Emuera.Api
 		/// <param name="gameDir">csv / erb / emuera.config を含むフォルダ</param>
 		/// <param name="useSystemFonts">OS にインストールされたフォントを名前で引くか
 		/// (false で「そのフォントが入っていない Android」を再現)</param>
-		public static System.Drawing.Font ResolveDefaultFont(string gameDir, bool useSystemFonts = true)
+		/// <param name="fallbackFontPath">
+		/// 名前で引けなかったときの受け皿にするフォントファイル。端末では
+		/// <c>MainActivity.SetupFonts</c> が APK 同梱の BIZ UDGothic をここに据える。
+		/// <see cref="InspectFonts"/> と違って受け皿は<b>戻さない</b> — 呼び出し側は
+		/// 返ったフォントで測り続けるので、代替フェイスの解決もその構成のままでないと
+		/// 実機を再現したことにならない。
+		/// </param>
+		public static System.Drawing.Font ResolveDefaultFont(string gameDir, bool useSystemFonts = true,
+			string fallbackFontPath = null)
 		{
 			ArgumentNullException.ThrowIfNull(gameDir);
 
@@ -324,6 +332,9 @@ namespace MinorShift.Emuera.Api
 			System.Drawing.GlyphFallback.Clear();
 			GlobalStatic.Pfc = new System.Drawing.Text.PrivateFontCollection();
 			System.Drawing.FontResolver.UseSystemFonts = useSystemFonts;
+			if (fallbackFontPath != null)
+				System.Drawing.FontResolver.Fallback = SkiaSharp.SKTypeface.FromFile(fallbackFontPath)
+					?? throw new FileNotFoundException("受け皿にするフォントを読めません", fallbackFontPath);
 			try
 			{
 				Program.Initialize(gameDir);       // ここで font/ が登録される
