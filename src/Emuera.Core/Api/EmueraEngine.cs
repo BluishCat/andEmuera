@@ -364,6 +364,22 @@ namespace MinorShift.Emuera.Api
 			return window.PressEnterKey(skipMessage, false);
 		}
 
+		/// <summary>
+		/// タッチ位置をポインタ位置として控える。
+		///
+		/// 上流は MOUSEX/MOUSEY を Cursor.Position から、入力後のホバーし直しを
+		/// Control.MousePosition から取る。Android には常駐のポインタが無いので、
+		/// 最後に触った場所をポインタ位置として置いておく。
+		/// これが無いと MOUSEX() が 0、MOUSEY() が -画面高 に張り付き、
+		/// ポインタ位置に箱を出すゲームが画面の隅に描いてしまう
+		/// (ShinEraTenseiP の INPUT_YN_POPUP がターンエンドの確認をこの形で出す)。
+		/// </summary>
+		static void SetPointer(System.Drawing.Point point)
+		{
+			System.Windows.Forms.Control.MousePosition = point;
+			System.Windows.Forms.Cursor.Position = point;
+		}
+
 		/// <summary>画面のタップ / クリック。座標は描画領域内のピクセル。</summary>
 		public EmueraTapResult Click(int x, int y, bool rightButton = false)
 		{
@@ -372,6 +388,7 @@ namespace MinorShift.Emuera.Api
 			window.MarkDirty();
 			var point = new System.Drawing.Point(x, y);
 			// 選択中のボタンはポインタ位置で決まるので、先に移動させてから確定する
+			SetPointer(point);
 			console.MoveMouse(point);
 			return window.HandleClick(point, rightButton
 				? System.Windows.Forms.MouseButtons.Right
@@ -384,7 +401,10 @@ namespace MinorShift.Emuera.Api
 		/// </summary>
 		public bool MoveMouse(int x, int y)
 		{
-			if (console == null || !console.MoveMouse(new System.Drawing.Point(x, y)))
+			if (console == null)
+				return false;
+			SetPointer(new System.Drawing.Point(x, y));
+			if (!console.MoveMouse(new System.Drawing.Point(x, y)))
 				return false;
 			window.MarkDirty();
 			return true;
@@ -400,6 +420,7 @@ namespace MinorShift.Emuera.Api
 			if (console == null)
 				return;
 			window.MarkDirty();
+			SetPointer(new System.Drawing.Point(x, y));
 			console.MouseWheel(new System.Drawing.Point(x, y), delta);
 		}
 
