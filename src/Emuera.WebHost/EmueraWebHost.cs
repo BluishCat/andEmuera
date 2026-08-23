@@ -155,6 +155,11 @@ namespace MinorShift.Emuera.WebHost
 		/// <summary>直近に割り込みで焼いた時刻。</summary>
 		long lastPushTicks;
 
+		// 実行中の割り込み描画がどこで落ちているかを /stats から見るための内訳。
+		// 「途中が出ない」ときに、呼ばれていないのか・間引かれたのか・
+		// 中身が同じで送らなかったのかを切り分ける
+		long liveCalls, liveThrottled, liveNoGate, liveSent;
+
 		/// <summary>
 		/// スクリプト実行中に途中経過を焼く間隔 (ms)。
 		/// <c>ANDEMUERA_LIVE_FRAME_MS=0</c> で従来動作 (実行中は 1 枚も出さない) に戻せる。
@@ -176,12 +181,16 @@ namespace MinorShift.Emuera.WebHost
 		/// </summary>
 		public bool TryPushFrameNow()
 		{
+			System.Threading.Interlocked.Increment(ref liveCalls);
 			if (LiveFrameIntervalMs <= 0 || !binaryFrames || engine == null || pushingFrame)
 				return false;
 
 			long now = Environment.TickCount64;
 			if (now - lastPushTicks < LiveFrameIntervalMs)
+			{
+				System.Threading.Interlocked.Increment(ref liveThrottled);
 				return false;
+			}
 			// 焼けなかった回も間隔は進める (失敗を連打しない)
 			lastPushTicks = now;
 
@@ -189,7 +198,10 @@ namespace MinorShift.Emuera.WebHost
 			// lock で待つと実行が明けるまでそのスレッドを止めてしまう。
 			// スクリプト実行スレッド自身なら同一スレッドの再入として通る
 			if (!Monitor.TryEnter(gate))
+			{
+				System.Threading.Interlocked.Increment(ref liveNoGate);
 				return false;
+			}
 
 			// EncodeCurrentScreen → EnsureRendered → 上流の Refresh と戻ってくる道があるので
 			// 自分自身への再入を止める
@@ -198,7 +210,10 @@ namespace MinorShift.Emuera.WebHost
 			{
 				// ack は立てない。立てると実行が明けた直後の最終フレームが
 				// 返るはずのない ack を 2 秒待つことになる
-				return TryEncodeAndBroadcast(trackAck: false);
+				bool sent = TryEncodeAndBroadcast(trackAck: false);
+				if (sent)
+					System.Threading.Interlocked.Increment(ref liveSent);
+				return sent;
 			}
 			catch (Exception ex)
 			{
@@ -495,6 +510,10 @@ namespace MinorShift.Emuera.WebHost
 							recentInputMs = Array.ConvertAll(recent, v => Math.Round(v, 1)),
 							encoded = encodedCount,
 							skipped = skippedCount,
+							// 実行中の割り込み描画の内訳。
+							// calls = RepaintNow から呼ばれた回数 / throttled = 間隔で見送り /
+							// noGate = 他スレッドが gate を持っていて見送り / sent = 実際に焼いて送った
+							live = new { calls = liveCalls, throttled = liveThrottled, noGate = liveNoGate, sent = liveSent, intervalMs = LiveFrameIntervalMs },
 							pngBytes = screenCache?.Length ?? 0,
 							renderMs = Math.Round(renderMs, 2),
 							hashMs = Math.Round(hashMs, 2),
