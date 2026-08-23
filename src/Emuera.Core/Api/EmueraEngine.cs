@@ -481,13 +481,21 @@ namespace MinorShift.Emuera.Api
 			return window.PressEnterKey(skipMessage, false);
 		}
 
-		/// <summary>右クリック相当 (メッセージスキップ)。座標を持たない操作バーのボタン用。</summary>
+		/// <summary>
+		/// 右クリック相当。操作バーの「スキップ」ボタン用。
+		///
+		/// Windows の右クリックは「カーソルがある場所で右ボタンを押す」なので、
+		/// ボタン自身は座標を持たなくても、最後に触った位置 (SetPointer が控えている
+		/// Cursor.Position) で押したことにすれば画面の長押しと同じ結果になる。
+		/// 選択肢の上にポインタが残っていればその選択肢への右クリックになり、
+		/// INPUTMOUSEKEY 待ちでも上流と同じくポインタ位置が入力値になる。
+		/// </summary>
 		public EmueraTapResult MessageSkip()
 		{
 			if (console == null)
 				return EmueraTapResult.Busy;
-			window.MarkDirty();
-			return window.RightClickNoTarget();
+			var pointer = System.Windows.Forms.Cursor.Position;
+			return Click(pointer.X, pointer.Y, rightButton: true);
 		}
 
 		/// <summary>現在の画面サイズ。</summary>

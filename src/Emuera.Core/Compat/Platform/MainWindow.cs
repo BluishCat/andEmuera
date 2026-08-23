@@ -58,6 +58,20 @@ namespace MinorShift.Emuera.Forms
 			action();
 			return true;
 		}
+
+		/// <summary>
+		/// いまの画面を 1 枚その場で焼いて送る。送れたら true。
+		///
+		/// スクリプト実行中は実行スレッドがホストの排他を握ったままなので、
+		/// 転送側のワーカーは 1 枚もエンコードできない。呼び出し元 (RepaintNow) は
+		/// その排他を持っているスレッド自身なので、ここで焼けば「処理中」の間も
+		/// 画面が進む。PC 版の右クリックのように途中経過を見せるための経路。
+		///
+		/// 間引きは転送側と同じ ack で行う。表示が追いついていなければ何もしないので、
+		/// 遅い端末では自然に枚数が減る。既定実装は何もしない
+		/// (転送を持たないホスト。TestHarness など)。
+		/// </summary>
+		bool TryPushFrameNow() => false;
 	}
 
 	public sealed class MainWindow : IDisposable
@@ -263,22 +277,6 @@ namespace MinorShift.Emuera.Forms
 		}
 
 		/// <summary>
-		/// 座標を持たない右クリック (操作バーのスキップボタン)。
-		/// 画面の長押しと同じ結果にするため、判定は HandleClick に任せる。
-		/// </summary>
-		public EmueraTapResult RightClickNoTarget()
-		{
-			if (Console == null || Console.IsInProcess)
-				return EmueraTapResult.Busy;
-			// INPUTMOUSEKEY 待ちは座標そのものが入力値なので、ボタンからは扱わない
-			if (Console.IsWaitingPrimitive)
-				return EmueraTapResult.NoTarget;
-			// 選択中のボタンが残っていると HandleClick が選択肢の確定側へ回ってしまう
-			Console.LeaveMouse();
-			return HandleClick(new Point(-1, -1), MouseButtons.Right);
-		}
-
-		/// <summary>
 		/// 履歴を遡っていたら最新行へ戻す。動いたら true。
 		///
 		/// 上流はマウスでもキーでも「まず最新行へ戻してから入力を処理する」
@@ -415,11 +413,14 @@ namespace MinorShift.Emuera.Forms
 		/// 最中に割り込むので、ホストの排他に乗せる。取れなければその回は捨てる
 		/// (スクリプトが終われば RefreshStrings(true) が飛んでくる)。
 		///
-		/// <b>スクリプト実行中は描かない。</b>実行スレッドがホストの排他を握ったままなので、
-		/// 転送側 (WebHost の producer) はその間 1 枚もエンコードできない。
-		/// つまり実行中に描いたフレームは<b>構造上どれも画面に出ない</b>ので、
-		/// 印だけ残して最後に 1 回描けば足りる (実測: 能力表示コマンド 1 回で 13 回描き、
-		/// うち 12 回が捨てフレーム。1600x2691 で 86ms)。
+		/// <b>スクリプト実行中はここでは描かない。</b>実行スレッドがホストの排他を
+		/// 握ったままなので、転送側 (WebHost の producer) はその間 1 枚もエンコードできず、
+		/// ここで描いても画面に出ない捨てフレームにしかならない
+		/// (実測: 能力表示コマンド 1 回で 13 回描き、うち 12 回が捨て。1600x2691 で 86ms)。
+		/// 代わりに <see cref="IWindowHost.TryPushFrameNow"/> でホスト自身に焼かせる。
+		/// 上流の右クリック (メッセージスキップ) は途中経過が次々出るのが本来の見え方で、
+		/// 最後の 1 枚だけでは別物になるため。表示が追いつかない回はホストが見送るので、
+		/// 捨てフレームには戻らない。
 		/// 描画時に確定する EscapedParts は、参照元 (BINPUT 系) が
 		/// <see cref="EnsureRendered"/> を通るようにして担保する。
 		/// </summary>
@@ -438,6 +439,11 @@ namespace MinorShift.Emuera.Forms
 			{
 				MarkDirty();
 				host.RequestRedraw();
+				// 転送側は排他に入れないので、この場で 1 枚出しておく。
+				// 上流の右クリック (メッセージスキップ) は途中経過が次々出るのが
+				// 本来の見え方で、最後の 1 枚だけ出しても別物になってしまう。
+				// 表示が追いついていなければホスト側が見送るので焼き損ねは増えない
+				host.TryPushFrameNow();
 				return;
 			}
 

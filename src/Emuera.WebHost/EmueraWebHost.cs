@@ -149,7 +149,127 @@ namespace MinorShift.Emuera.WebHost
 			return true;
 		}
 
+		/// <summary>エンコード中の再入よけ。呼ぶのはスクリプト実行スレッドだけ。</summary>
+		bool pushingFrame;
+
+		/// <summary>直近に割り込みで焼いた時刻。</summary>
+		long lastPushTicks;
+
+		// 実行中の割り込み描画がどこで落ちているかを /stats から見るための内訳。
+		// 「途中が出ない」ときに、呼ばれていないのか・間引かれたのか・
+		// 中身が同じで送らなかったのかを切り分ける
+		long liveCalls, liveThrottled, liveNoGate, liveSent;
+
+		/// <summary>
+		/// スクリプト実行中に途中経過を焼く間隔 (ms)。
+		/// <c>ANDEMUERA_LIVE_FRAME_MS=0</c> で従来動作 (実行中は 1 枚も出さない) に戻せる。
+		/// </summary>
+		static readonly long LiveFrameIntervalMs =
+			long.TryParse(Environment.GetEnvironmentVariable("ANDEMUERA_LIVE_FRAME_MS"), out var envMs) && envMs >= 0
+				? envMs
+				: 100;
+
+		/// <summary>
+		/// スクリプト実行中の割り込み描画。呼び出し元は gate を握っている実行スレッド自身。
+		///
+		/// producer はその間 gate に入れないので、ここで焼かないと
+		/// 「処理中」が明けるまで 1 枚も画面に出ない。
+		///
+		/// <b>間引きは ack ではなく時間で行う。</b>ack を運んでくる受信スレッドが
+		/// スクリプトを回している当人なので、実行中は ack が 1 つも処理されない。
+		/// ack を待つ作りにすると 1 枚出したきり <see cref="AckTimeout"/> (2 秒) まで止まる。
+		/// </summary>
+		public bool TryPushFrameNow()
+		{
+			System.Threading.Interlocked.Increment(ref liveCalls);
+			if (LiveFrameIntervalMs <= 0 || !binaryFrames || engine == null || pushingFrame)
+				return false;
+
+			long now = Environment.TickCount64;
+			if (now - lastPushTicks < LiveFrameIntervalMs)
+			{
+				System.Threading.Interlocked.Increment(ref liveThrottled);
+				return false;
+			}
+			// 焼けなかった回も間隔は進める (失敗を連打しない)
+			lastPushTicks = now;
+
+			// 待たない。ここへはアニメ用タイマー (スレッドプール) からも来るので、
+			// lock で待つと実行が明けるまでそのスレッドを止めてしまう。
+			// スクリプト実行スレッド自身なら同一スレッドの再入として通る
+			if (!Monitor.TryEnter(gate))
+			{
+				System.Threading.Interlocked.Increment(ref liveNoGate);
+				return false;
+			}
+
+			// EncodeCurrentScreen → EnsureRendered → 上流の Refresh と戻ってくる道があるので
+			// 自分自身への再入を止める
+			pushingFrame = true;
+			try
+			{
+				// ack は立てない。立てると実行が明けた直後の最終フレームが
+				// 返るはずのない ack を 2 秒待つことになる
+				bool sent = TryEncodeAndBroadcast(trackAck: false);
+				if (sent)
+					System.Threading.Interlocked.Increment(ref liveSent);
+				return sent;
+			}
+			catch (Exception ex)
+			{
+				Log?.Invoke($"途中フレームの生成に失敗: {ex.GetType().Name}: {ex.Message}");
+				return false;
+			}
+			finally
+			{
+				pushingFrame = false;
+				Monitor.Exit(gate);
+			}
+		}
+
 		#endregion
+
+		/// <summary>
+		/// いまの世代を 1 枚焼いて送る。送ったら true。
+		///
+		/// producer (通常経路) と <see cref="TryPushFrameNow"/> (実行中の割り込み) の共通部分。
+		/// gate は呼び出し元が既に握っていても構わない。同一スレッドなら Monitor が再入を通す。
+		/// </summary>
+		/// <param name="trackAck">
+		/// 送ったフレームの ack を待つか。実行中の割り込みは ack が処理されない区間なので false。
+		/// </param>
+		bool TryEncodeAndBroadcast(bool trackAck = true)
+		{
+			byte[] frame;
+			lock (gate)
+			{
+				if (engine == null || lastSentGeneration == generation)
+					return false;
+
+				int gen = generation;
+				int encodedBefore = encodedCount;
+				var png = EncodeCurrentScreen();
+				lastSentGeneration = gen;
+
+				// 中身が前回と同じなら送らない (EncodeCurrentScreen が
+				// 再エンコードを省いた = encodedCount が増えていない)
+				if (png == null || png.Length == 0)
+					return false;
+				if (encodedCount == encodedBefore && sentAnyFrame)
+					return false;
+
+				frame = BuildFrame(gen, engine.ScrollState, png);
+				sentAnyFrame = true;
+			}
+
+			if (trackAck)
+			{
+				ackPending = true;
+				Volatile.Write(ref ackDeadlineTicks, Environment.TickCount64 + (long)AckTimeout.TotalMilliseconds);
+			}
+			server.BroadcastImage(frame);
+			return true;
+		}
 
 		string lastState;
 		int lastButtons = -1;
@@ -271,39 +391,14 @@ namespace MinorShift.Emuera.WebHost
 					ackPending = false;
 				}
 
-				byte[] frame = null;
 				try
 				{
-					lock (gate)
-					{
-						if (engine == null || lastSentGeneration == generation)
-							continue;
-
-						int gen = generation;
-						int encodedBefore = encodedCount;
-						var png = EncodeCurrentScreen();
-						lastSentGeneration = gen;
-
-						// 中身が前回と同じなら送らない (EncodeCurrentScreen が
-						// 再エンコードを省いた = encodedCount が増えていない)
-						if (png == null || png.Length == 0)
-							continue;
-						if (encodedCount == encodedBefore && sentAnyFrame)
-							continue;
-
-						frame = BuildFrame(gen, engine.ScrollState, png);
-						sentAnyFrame = true;
-					}
+					TryEncodeAndBroadcast();
 				}
 				catch (Exception ex)
 				{
 					Log?.Invoke($"フレーム生成に失敗: {ex.GetType().Name}: {ex.Message}");
-					continue;
 				}
-
-				ackPending = true;
-				Volatile.Write(ref ackDeadlineTicks, Environment.TickCount64 + (long)AckTimeout.TotalMilliseconds);
-				server.BroadcastImage(frame);
 			}
 		}
 
@@ -415,6 +510,10 @@ namespace MinorShift.Emuera.WebHost
 							recentInputMs = Array.ConvertAll(recent, v => Math.Round(v, 1)),
 							encoded = encodedCount,
 							skipped = skippedCount,
+							// 実行中の割り込み描画の内訳。
+							// calls = RepaintNow から呼ばれた回数 / throttled = 間隔で見送り /
+							// noGate = 他スレッドが gate を持っていて見送り / sent = 実際に焼いて送った
+							live = new { calls = liveCalls, throttled = liveThrottled, noGate = liveNoGate, sent = liveSent, intervalMs = LiveFrameIntervalMs },
 							pngBytes = screenCache?.Length ?? 0,
 							renderMs = Math.Round(renderMs, 2),
 							hashMs = Math.Round(hashMs, 2),
@@ -571,10 +670,11 @@ namespace MinorShift.Emuera.WebHost
 							tapResult = engine.PressEnter();
 							break;
 
-						// 操作バーのスキップボタン。画面の長押し (右クリック) と同じ経路
+						// 操作バーのスキップボタン。最後に触った位置での右クリックとして
+						// 画面の長押しと同じ経路へ流す
 						case "skip":
 							tapResult = engine.MessageSkip();
-							changed = true;   // LeaveMouse の消し込みも必ず反映させる
+							changed = true;   // 選択表示が変わることがあるので必ず反映させる
 							break;
 
 						case "resize":
