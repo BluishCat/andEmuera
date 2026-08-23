@@ -7,8 +7,8 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationId>rip.eragames.andemuera</ApplicationId>
-    <ApplicationVersion>7</ApplicationVersion>
-    <ApplicationDisplayVersion>0.7</ApplicationDisplayVersion>
+    <ApplicationVersion>8</ApplicationVersion>
+    <ApplicationDisplayVersion>0.8</ApplicationDisplayVersion>
     <RootNamespace>AndEmuera</RootNamespace>
 
     <!--
