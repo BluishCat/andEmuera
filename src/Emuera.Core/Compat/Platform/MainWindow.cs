@@ -263,22 +263,6 @@ namespace MinorShift.Emuera.Forms
 		}
 
 		/// <summary>
-		/// 座標を持たない右クリック (操作バーのスキップボタン)。
-		/// 画面の長押しと同じ結果にするため、判定は HandleClick に任せる。
-		/// </summary>
-		public EmueraTapResult RightClickNoTarget()
-		{
-			if (Console == null || Console.IsInProcess)
-				return EmueraTapResult.Busy;
-			// INPUTMOUSEKEY 待ちは座標そのものが入力値なので、ボタンからは扱わない
-			if (Console.IsWaitingPrimitive)
-				return EmueraTapResult.NoTarget;
-			// 選択中のボタンが残っていると HandleClick が選択肢の確定側へ回ってしまう
-			Console.LeaveMouse();
-			return HandleClick(new Point(-1, -1), MouseButtons.Right);
-		}
-
-		/// <summary>
 		/// 履歴を遡っていたら最新行へ戻す。動いたら true。
 		///
 		/// 上流はマウスでもキーでも「まず最新行へ戻してから入力を処理する」
