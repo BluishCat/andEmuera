@@ -289,6 +289,15 @@ static partial class GameSync
 	}
 
 	/// <summary>
+	/// 端末のゲームのフォルダにアプリが入れるようにする。送るものが無いときに呼ぶ
+	/// (以前の版で送ったフォルダは権限が付いておらず、アプリが起動時に落ちることがある)。
+	/// </summary>
+	public static Task<string> RepairAccessAsync(Adb adb, string gameName, CancellationToken ct) =>
+		adb.ScriptAsync(
+			$"{GrantAppAccess(Device.FilesDir)}\n{GrantAppAccess(Device.GamesDir)}\n" +
+			GrantAppAccess($"{Device.GamesDir}/{gameName}", recurse: true), ct);
+
+	/// <summary>
 	/// adb (shell) が作ったフォルダにアプリが入れるようにするコマンド。
 	/// shell が作るフォルダは 2770 (持ち主 shell・グループ ext_data_rw) になり、アプリのプロセスは
 	/// ext_data_rw に入っていないので中を読めない。アプリを入れてから一度も起動しないうちに
