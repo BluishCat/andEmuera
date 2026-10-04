@@ -251,12 +251,33 @@ adb install しても古いコードのまま動きます。-Build を使うか�
 "@
     }
 
+    # 危ないものは adb を呼ぶ前に止める。古い Debug APK (.idsig 付き) を adb install -r したら、
+    # DOWNGRADE で拒否された直後に adb がアンインストールして入れ直し、端末のゲームとセーブが全部消えたことがある
+    $aapt = Get-ChildItem (Join-Path (Split-Path (Split-Path $adbExe)) 'build-tools\*\aapt2.exe') -ErrorAction SilentlyContinue |
+        Sort-Object { [version]($_.Directory.Name -replace '[^\d.].*$', '') } -Descending | Select-Object -First 1
+    if (-not $aapt) { throw "APK の版を確かめる aapt2.exe が見つかりません (Android SDK の build-tools)。確かめずには入れません。" }
+    $badging = (& $aapt.FullName dump badging $apkPath 2>&1 | ForEach-Object { "$_" }) -join "`n"
+    if ($badging -notmatch "package: name='([^']+)' versionCode='(\d+)'") { throw "APK の版を読めませんでした:`n$badging" }
+    $apkPackage = $Matches[1]; $apkCode = [long]$Matches[2]
+    if ($apkPackage -ne $appId) { throw "これは andEmuera の APK ではありません ($apkPackage)。" }
+    if ($badging -match 'application-debuggable') { throw "Debug ビルドの APK は入れません。-Build を使ってください。" }
+    if ($installed -and $apkCode -lt [long]$installed.VersionCode) {
+        throw "端末のほうが新しい版です (端末 $($installed.VersionCode) / APK $apkCode)。古い APK は入れません。"
+    }
+    if ($installed -and $installed.Debuggable) {
+        throw @"
+端末のアプリは Debug 署名です。Release の APK では上書きできません。
+入れ替えるにはアンインストールが必要で、そのとき files/ ごとゲームとセーブが消えます。
+"@
+    }
+
     Write-Host ""
     Write-Host ("APK を入れます: {0} ({1:N1} MB)" -f $apkPath, ((Get-Item $apkPath).Length / 1MB)) -ForegroundColor Cyan
     if ($PSCmdlet.ShouldProcess($Serial, "adb install -r $apkPath")) {
-        # -r は上書き。署名が違えば INSTALL_FAILED_UPDATE_INCOMPATIBLE で止まり、端末のデータには触れない
+        # -r は上書き。-d (ダウングレード) は付けない。
+        # --no-incremental: incremental install は失敗時の振る舞いが読めない (アンインストールされた例がある) ので使わない
         $ErrorActionPreference = 'Continue'
-        $out = & $adbExe -s $Serial install -r $apkPath 2>&1 | ForEach-Object { "$_" }
+        $out = & $adbExe -s $Serial install -r --no-incremental $apkPath 2>&1 | ForEach-Object { "$_" }
         $code = $LASTEXITCODE
         $ErrorActionPreference = 'Stop'
         $text = $out -join "`n"

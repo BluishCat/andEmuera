@@ -1,0 +1,402 @@
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+
+namespace AndEmuera.Installer;
+
+sealed record LocalFile(string Rel, long Size, long Time, string FullPath);
+
+/// <summary>何を送るか。<see cref="GameSync.PlanAsync"/> が作る。</summary>
+sealed class SyncPlan
+{
+	public required string Name { get; init; }
+	public required string LocalRoot { get; init; }
+	public required bool ExistsOnDevice { get; init; }
+	public required int LocalCount { get; init; }
+	public required long LocalBytes { get; init; }
+	public List<LocalFile> Send { get; } = [];
+	public int Added { get; set; }
+	public int Changed { get; set; }
+	public int SkippedSave { get; set; }
+	public int OnlyRemote { get; set; }
+	/// <summary>端末側の名前を PC の大文字小文字に合わせる改名 (浅い順)。</summary>
+	public List<(string Old, string New)> Renames { get; } = [];
+	public bool BackupSave { get; set; }
+	public long SendBytes => Send.Sum(f => f.Size);
+	public bool UpToDate => Send.Count == 0 && Renames.Count == 0;
+}
+
+readonly record struct SyncProgress(long DoneBytes, long TotalBytes, int DoneFiles, int TotalFiles, string Message);
+
+/// <summary>
+/// ゲームフォルダを端末へ送る。tools/deploy.ps1 と同じ考え方:
+///
+/// <list type="bullet">
+/// <item>端末に無ければ全部、あれば差分だけ (サイズが違うか、PC 側の更新時刻のほうが新しいもの)。PC 側を正とする</item>
+/// <item>大文字小文字だけ違う名前は、端末側を PC の綴りに改名する</item>
+/// <item>sav/ は、端末にすでにあるゲームには送らない (端末で進めたセーブを守る)。送るときは先に控える</item>
+/// <item>端末にだけあるファイルは消さない</item>
+/// </list>
+///
+/// adb の罠も同じように避ける。remote 側のディレクトリ名が日本語だと adb push がハングし、
+/// 複数ファイルを 1 回の push でディレクトリへ送ると成功表示のまま何も書かれないので、
+/// 送るものはローカルの一時フォルダに構造ごと並べ、ASCII 名のディレクトリ 1 個として送ってから端末上で合流させる。
+/// </summary>
+static partial class GameSync
+{
+	const string StageRemote = Device.GamesDir + "/" + Device.StagePrefix + "stage";
+
+	/// <summary>1 回の push にまとめる上限。進捗と中止の細かさを決める。</summary>
+	const long BatchBytes = 96L * 1024 * 1024;
+	const int BatchFiles = 4000;
+
+	static readonly Regex SavePattern = SaveRegex();
+
+	public static bool IsGameFolder(string dir) =>
+		// Windows は大文字小文字を区別しないので CSV / csv のどちらでも当たる
+		Directory.Exists(Path.Combine(dir, "csv")) && Directory.Exists(Path.Combine(dir, "erb"));
+
+	/// <summary>ゲームフォルダの名前として端末に置けるか。</summary>
+	public static string? ValidateName(string name)
+	{
+		if (name.StartsWith(Device.StagePrefix, StringComparison.OrdinalIgnoreCase))
+			return $"「{Device.StagePrefix}」で始まるフォルダ名は使えません。";
+		if (name.Contains('\n') || name.Contains('/'))
+			return "フォルダ名に使えない文字があります。";
+		return null;
+	}
+
+	/// <summary>
+	/// PC 側の一覧。DirectoryInfo.EnumerateFiles は FindFirstFile の結果からサイズと時刻を埋めるので、
+	/// ファイルごとの stat が要らない (HDD 上の 18 万ファイルで数十秒)。
+	/// </summary>
+	static Dictionary<string, LocalFile> LocalIndex(string root, CancellationToken ct)
+	{
+		var index = new Dictionary<string, LocalFile>(StringComparer.Ordinal);
+		var info = new DirectoryInfo(root);
+		int prefix = info.FullName.TrimEnd('\\').Length + 1;
+		var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0, IgnoreInaccessible = true };
+		foreach (var f in info.EnumerateFiles("*", options))
+		{
+			ct.ThrowIfCancellationRequested();
+			string rel = f.FullName[prefix..].Replace('\\', '/');
+			index[rel] = new LocalFile(rel, f.Length, new DateTimeOffset(f.LastWriteTimeUtc).ToUnixTimeSeconds(), f.FullName);
+		}
+		return index;
+	}
+
+	/// <summary>
+	/// 端末側の一覧。toybox find の -printf で「サイズ 時刻 相対パス」を出す (%T@ は小数付きの UNIX 秒)。
+	/// -exec stat {} + は日本語の長いパスが続くと Argument list too long で落ちるので使わない。
+	/// </summary>
+	static async Task<Dictionary<string, (long Size, long Time)>> RemoteIndexAsync(Adb adb, string remoteDir, CancellationToken ct)
+	{
+		string output = await adb.ScriptAsync($"cd {Adb.Q(remoteDir)} && find . -type f -printf '%s %T@ %P\\n'", ct);
+		var index = new Dictionary<string, (long, long)>(StringComparer.Ordinal);
+		foreach (string line in output.Split('\n'))
+		{
+			var m = RemoteLineRegex().Match(line);
+			if (m.Success) index[m.Groups[3].Value] = (long.Parse(m.Groups[1].Value), long.Parse(m.Groups[2].Value));
+		}
+		return index;
+	}
+
+	static async Task<bool> RemoteDirExistsAsync(Adb adb, string path, CancellationToken ct) =>
+		(await adb.ScriptAsync($"[ -d {Adb.Q(path)} ] && echo yes || echo no", ct)).Trim() == "yes";
+
+	public static async Task<SyncPlan> PlanAsync(Adb adb, string localRoot, bool includeSave, IProgress<string> status, CancellationToken ct)
+	{
+		localRoot = Path.GetFullPath(localRoot).TrimEnd('\\');
+		string name = Path.GetFileName(localRoot);
+		string remoteDir = $"{Device.GamesDir}/{name}";
+
+		status.Report("PC 側のファイルを数えています…");
+		var local = await Task.Run(() => LocalIndex(localRoot, ct), ct);
+
+		status.Report("端末の様子を見ています…");
+		bool exists = await RemoteDirExistsAsync(adb, remoteDir, ct);
+		var plan = new SyncPlan
+		{
+			Name = name, LocalRoot = localRoot, ExistsOnDevice = exists,
+			LocalCount = local.Count, LocalBytes = local.Values.Sum(f => f.Size),
+		};
+
+		if (!exists)
+		{
+			// 初回は全部。sav/ もそのまま送る (端末に上書きされるセーブが無いので)
+			plan.Send.AddRange(local.Values.OrderBy(f => f.Rel, StringComparer.Ordinal));
+			plan.Added = plan.Send.Count;
+			return plan;
+		}
+
+		status.Report("端末側のファイルを数えています…");
+		var remote = await RemoteIndexAsync(adb, remoteDir, ct);
+
+		await Task.Run(() => Diff(plan, local, remote, includeSave), ct);
+		plan.BackupSave = includeSave && plan.Send.Any(f => SavePattern.IsMatch(f.Rel)) &&
+			remote.Keys.Any(k => SavePattern.IsMatch(k));
+		return plan;
+	}
+
+	static void Diff(SyncPlan plan, Dictionary<string, LocalFile> local, Dictionary<string, (long Size, long Time)> remote, bool includeSave)
+	{
+		// 端末の名前を大文字小文字を無視して引けるようにする (ディレクトリも含めて)
+		var remoteCi = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		foreach (string p in remote.Keys)
+		{
+			int i = -1;
+			while (true)
+			{
+				i = p.IndexOf('/', i + 1);
+				string prefix = i < 0 ? p : p[..i];
+				remoteCi.TryAdd(prefix, prefix);
+				if (i < 0) break;
+			}
+		}
+
+		// PC の相対パス → 端末での今の相対パス。ずれていたら改名を積む
+		var renames = new Dictionary<string, string>(StringComparer.Ordinal); // PC の綴り → 端末の今の名前 (末端だけ)
+		var targets = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var (rel, l) in local)
+		{
+			string target = rel;
+			if (!remote.ContainsKey(rel))
+			{
+				var parts = rel.Split('/');
+				var acc = new StringBuilder();
+				for (int i = 0; i < parts.Length; i++)
+				{
+					if (i > 0) acc.Append('/');
+					acc.Append(parts[i]);
+					if (remoteCi.TryGetValue(acc.ToString(), out string? actual))
+					{
+						string leaf = actual[(actual.LastIndexOf('/') + 1)..];
+						if (!string.Equals(leaf, parts[i], StringComparison.Ordinal))
+							renames[string.Join('/', parts, 0, i + 1)] = leaf;
+						acc.Clear().Append(actual);
+					}
+					else
+					{
+						// ここから先は端末に無い。残りは PC の綴りのまま
+						for (int j = i + 1; j < parts.Length; j++) acc.Append('/').Append(parts[j]);
+						break;
+					}
+				}
+				target = acc.ToString();
+			}
+			targets.Add(target);
+
+			bool has = remote.TryGetValue(target, out var r);
+			// 時刻は「PC のほうが新しい」ときだけ差とみなす。以前 cp (-p なし) で入れたものは
+			// 端末側の時刻が入れた日時になっているので、一致を求めると全部送り直しになる
+			bool differs = !has || r.Size != l.Size || l.Time > r.Time;
+			if (!differs) continue;
+			if (!includeSave && SavePattern.IsMatch(rel)) { plan.SkippedSave++; continue; }
+			plan.Send.Add(l);
+			if (has) plan.Changed++; else plan.Added++;
+		}
+		plan.Send.Sort((a, b) => string.CompareOrdinal(a.Rel, b.Rel));
+		plan.OnlyRemote = remote.Keys.Count(k => !targets.Contains(k) && !SavePattern.IsMatch(k));
+
+		// 浅い順に並べる。改名前のパスは「PC の綴りの親 / 端末の今の名前」(親は先に直っている)
+		foreach (var (pcPath, leaf) in renames.OrderBy(x => x.Key.Count(c => c == '/')).ThenBy(x => x.Key, StringComparer.Ordinal))
+		{
+			int slash = pcPath.LastIndexOf('/');
+			string old = slash < 0 ? leaf : pcPath[..(slash + 1)] + leaf;
+			plan.Renames.Add((old, pcPath));
+		}
+	}
+
+	/// <summary>計画どおりに送る。</summary>
+	public static async Task ExecuteAsync(Adb adb, SyncPlan plan, IProgress<SyncProgress> progress, Action<string> log, CancellationToken ct)
+	{
+		string remoteDir = $"{Device.GamesDir}/{plan.Name}";
+		long total = plan.SendBytes;
+		int totalFiles = plan.Send.Count;
+
+		await adb.ScriptAsync($"mkdir -p {Adb.Q(Device.GamesDir)}", ct);
+
+		if (plan.Renames.Count > 0)
+		{
+			progress.Report(new(0, total, 0, totalFiles, "端末側の名前を合わせています…"));
+			// 端末のストレージは大文字小文字を区別しないことがあり、mv csv CSV は「同じもの」で失敗しうる。いったん別名を挟む
+			var sb = new StringBuilder();
+			foreach (var (old, @new) in plan.Renames)
+			{
+				string o = Adb.Q($"{remoteDir}/{old}"), t = Adb.Q($"{remoteDir}/{old}.zz_recase"), n = Adb.Q($"{remoteDir}/{@new}");
+				sb.Append($"mv {o} {t} && mv {t} {n} || exit 1\n");
+				log($"名前を合わせる: {old} → {@new}");
+			}
+			await adb.ScriptAsync(sb.ToString(), ct);
+		}
+
+		if (plan.BackupSave)
+		{
+			progress.Report(new(0, total, 0, totalFiles, "端末のセーブを PC に控えています…"));
+			string saved = await BackupSaveAsync(adb, plan.Name, ct);
+			log($"端末のセーブを控えました: {saved}");
+		}
+
+		if (totalFiles == 0) return;
+
+		// 送るものを束に分ける。束ごとに push → 合流させるので、途中で止めても端末側は束の単位で整っている
+		var batches = new List<List<LocalFile>>();
+		var cur = new List<LocalFile>();
+		long curBytes = 0;
+		foreach (var f in plan.Send)
+		{
+			if (cur.Count > 0 && (curBytes + f.Size > BatchBytes || cur.Count >= BatchFiles))
+			{
+				batches.Add(cur);
+				cur = [];
+				curBytes = 0;
+			}
+			cur.Add(f);
+			curBytes += f.Size;
+		}
+		if (cur.Count > 0) batches.Add(cur);
+
+		string stage = CreateLocalStage(plan.LocalRoot);
+		long doneBytes = 0;
+		int doneFiles = 0;
+		try
+		{
+			for (int b = 0; b < batches.Count; b++)
+			{
+				ct.ThrowIfCancellationRequested();
+				var batch = batches[b];
+				progress.Report(new(doneBytes, total, doneFiles, totalFiles, $"送っています… ({b + 1}/{batches.Count})"));
+
+				await Task.Run(() => FillStage(stage, batch, ct), ct);
+				await adb.ScriptAsync($"rm -rf {Adb.Q(StageRemote)}", ct);
+				await adb.CheckedAsync(ct, "push", stage, StageRemote);
+				await adb.ScriptAsync(MergeScript(StageRemote, remoteDir), ct);
+				ClearDirectory(stage);
+
+				doneBytes += batch.Sum(f => f.Size);
+				doneFiles += batch.Count;
+				progress.Report(new(doneBytes, total, doneFiles, totalFiles, $"送っています… ({b + 1}/{batches.Count})"));
+			}
+		}
+		finally
+		{
+			try { Directory.Delete(stage, true); } catch { }
+			try { await adb.ScriptAsync($"rm -rf {Adb.Q(StageRemote)}", CancellationToken.None); } catch { }
+		}
+	}
+
+	/// <summary>
+	/// 端末上で、送ってきた一時フォルダの中身をゲームフォルダへ合流させる。
+	/// cp で写すと容量を 2 倍使い時間もかかるので、mv で付け替える (同じストレージ内なので一瞬)。
+	/// mv は更新時刻を保つので、次回の突き合わせでも一致する。
+	/// </summary>
+	static string MergeScript(string from, string to) => $$"""
+		merge() {
+		  local e n
+		  for e in "$1"/* "$1"/.[!.]*; do
+		    [ -e "$e" ] || continue
+		    n=${e##*/}
+		    if [ -d "$e" ] && [ -d "$2/$n" ]; then
+		      merge "$e" "$2/$n" || return 1
+		    else
+		      rm -rf "$2/$n" && mv "$e" "$2/$n" || return 1
+		    fi
+		  done
+		}
+		if [ -d {{Adb.Q(to)}} ]; then
+		  merge {{Adb.Q(from)}} {{Adb.Q(to)}} || exit 1
+		  rm -rf {{Adb.Q(from)}}
+		else
+		  mv {{Adb.Q(from)}} {{Adb.Q(to)}} || exit 1
+		fi
+		""";
+
+	/// <summary>
+	/// ローカルの一時フォルダ。ゲームと同じドライブに作れればハードリンクで並べられる (コピーが要らない)。
+	/// 作れなければ %TEMP% に作り、そのときはコピーになる。
+	/// </summary>
+	static string CreateLocalStage(string localRoot)
+	{
+		string name = $".andemuera-stage-{Environment.ProcessId}";
+		string? parent = Path.GetDirectoryName(localRoot);
+		foreach (string? dir in new[] { parent != null ? Path.Combine(parent, name) : null, Path.Combine(Path.GetTempPath(), name) })
+		{
+			if (dir == null) continue;
+			try
+			{
+				if (Directory.Exists(dir)) Directory.Delete(dir, true);
+				var info = Directory.CreateDirectory(dir);
+				info.Attributes |= FileAttributes.Hidden;
+				return dir;
+			}
+			catch (Exception) when (dir != Path.Combine(Path.GetTempPath(), name)) { }
+		}
+		throw new InvalidOperationException("一時フォルダを作れませんでした。");
+	}
+
+	static void FillStage(string stage, List<LocalFile> batch, CancellationToken ct)
+	{
+		foreach (var f in batch)
+		{
+			ct.ThrowIfCancellationRequested();
+			string dst = Path.Combine(stage, f.Rel.Replace('/', '\\'));
+			Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+			// 読み取り専用のファイルはハードリンクにしない (消すときに属性を外すと元のファイルまで変わる)
+			bool readOnly = (File.GetAttributes(f.FullPath) & FileAttributes.ReadOnly) != 0;
+			if (readOnly || !CreateHardLink(dst, f.FullPath, IntPtr.Zero))
+				File.Copy(f.FullPath, dst, true); // File.Copy は更新時刻を保つ
+		}
+	}
+
+	static void ClearDirectory(string dir)
+	{
+		foreach (string sub in Directory.GetDirectories(dir)) Directory.Delete(sub, true);
+		foreach (string file in Directory.GetFiles(dir)) File.Delete(file);
+	}
+
+	/// <summary>セーブの控え場所 (ドキュメント\andEmuera\セーブの控え)。</summary>
+	public static string BackupRoot => Path.Combine(
+		Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "andEmuera", "セーブの控え");
+
+	/// <summary>
+	/// 端末の sav/ を PC へ控える。控えた場所を返す。
+	/// pull も remote 側が日本語のディレクトリだと怪しいので、端末上で ASCII 名へ複製してから引く。
+	/// </summary>
+	public static async Task<string> BackupSaveAsync(Adb adb, string gameName, CancellationToken ct)
+	{
+		string remoteSav = $"{Device.GamesDir}/{gameName}/sav";
+		string tmpRemote = $"{Device.GamesDir}/{Device.StagePrefix}sav";
+		string exists = await adb.ScriptAsync($"[ -d {Adb.Q(remoteSav)} ] && echo yes || echo no", ct);
+		if (exists.Trim() != "yes") throw new AdbException($"端末の {gameName} にはセーブ (sav フォルダ) がありません。");
+
+		string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+		string dest = Path.Combine(BackupRoot, gameName, stamp);
+		string tmpLocal = Path.Combine(Path.GetTempPath(), $"andemuera-sav-{stamp}-{Environment.ProcessId}");
+		try
+		{
+			await adb.ScriptAsync($"rm -rf {Adb.Q(tmpRemote)} && cp -rp {Adb.Q(remoteSav)} {Adb.Q(tmpRemote)}", ct);
+			await adb.CheckedAsync(ct, "pull", "-a", tmpRemote, tmpLocal);
+			CopyDirectory(tmpLocal, dest);
+		}
+		finally
+		{
+			try { await adb.ScriptAsync($"rm -rf {Adb.Q(tmpRemote)}", CancellationToken.None); } catch { }
+			try { if (Directory.Exists(tmpLocal)) Directory.Delete(tmpLocal, true); } catch { }
+		}
+		return dest;
+	}
+
+	static void CopyDirectory(string from, string to)
+	{
+		Directory.CreateDirectory(to);
+		foreach (string file in Directory.GetFiles(from)) File.Copy(file, Path.Combine(to, Path.GetFileName(file)), true);
+		foreach (string dir in Directory.GetDirectories(from)) CopyDirectory(dir, Path.Combine(to, Path.GetFileName(dir)));
+	}
+
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	static extern bool CreateHardLink(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
+
+	[GeneratedRegex(@"^(?i)sav/")] private static partial Regex SaveRegex();
+	[GeneratedRegex(@"^(\d+) (\d+)(?:\.\d*)? (.+)$")] private static partial Regex RemoteLineRegex();
+}
