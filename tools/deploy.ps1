@@ -135,11 +135,23 @@ function Invoke-Adb {
 
 # 進捗をそのまま見せたい push 用。adb は進捗や結果を stderr に出すことがあり、
 # 呼び出し側が 2>&1 を付けていると Stop で止まるので、ここでも Continue にする
+#
+# adb はパスが長すぎて読めないファイル (Windows の 260 文字制限) を「cannot lstat」と言って飛ばし、
+# それでも終了コード 0 を返す。「N files pushed」の数と adb: error を見て、全部届いたか確かめる
 function Invoke-AdbPush {
-    param([string]$From, [string]$To)
+    param([string]$From, [string]$To, [int]$Expected)
     $ErrorActionPreference = 'Continue'
-    & $adbExe -s $script:Serial push $From $To
-    if ($LASTEXITCODE -ne 0) { throw "adb push に失敗しました (終了コード $LASTEXITCODE)。" }
+    $out = & $adbExe -s $script:Serial push $From $To 2>&1 | ForEach-Object { "$_" }
+    $code = $LASTEXITCODE
+    $out | Where-Object { $_ -match 'files? pushed' } | ForEach-Object { Write-Host "  $_" }
+    if ($code -ne 0) { throw "adb push に失敗しました (終了コード $code)。`n$(($out | Select-Object -Last 10) -join "`n")" }
+    $text = $out -join "`n"
+    $pushed = if ($text -match '(\d+) files? pushed') { [int]$Matches[1] } else { -1 }
+    $errors = @($out | Where-Object { $_ -match 'adb: error' })
+    if ($pushed -ne $Expected -or $errors.Count) {
+        throw "一部のファイルを送れませんでした ($Expected 個のうち $([Math]::Max($pushed, 0)) 個)。" +
+              "パスが長すぎる (260 文字超) と adb は読めません。`n$(($errors | Select-Object -First 5) -join "`n")"
+    }
 }
 
 # 端末上でシェルスクリプトを走らせる。
@@ -251,12 +263,33 @@ adb install しても古いコードのまま動きます。-Build を使うか�
 "@
     }
 
+    # 危ないものは adb を呼ぶ前に止める。古い Debug APK (.idsig 付き) を adb install -r したら、
+    # DOWNGRADE で拒否された直後に adb がアンインストールして入れ直し、端末のゲームとセーブが全部消えたことがある
+    $aapt = Get-ChildItem (Join-Path (Split-Path (Split-Path $adbExe)) 'build-tools\*\aapt2.exe') -ErrorAction SilentlyContinue |
+        Sort-Object { [version]($_.Directory.Name -replace '[^\d.].*$', '') } -Descending | Select-Object -First 1
+    if (-not $aapt) { throw "APK の版を確かめる aapt2.exe が見つかりません (Android SDK の build-tools)。確かめずには入れません。" }
+    $badging = (& $aapt.FullName dump badging $apkPath 2>&1 | ForEach-Object { "$_" }) -join "`n"
+    if ($badging -notmatch "package: name='([^']+)' versionCode='(\d+)'") { throw "APK の版を読めませんでした:`n$badging" }
+    $apkPackage = $Matches[1]; $apkCode = [long]$Matches[2]
+    if ($apkPackage -ne $appId) { throw "これは andEmuera の APK ではありません ($apkPackage)。" }
+    if ($badging -match 'application-debuggable') { throw "Debug ビルドの APK は入れません。-Build を使ってください。" }
+    if ($installed -and $apkCode -lt [long]$installed.VersionCode) {
+        throw "端末のほうが新しい版です (端末 $($installed.VersionCode) / APK $apkCode)。古い APK は入れません。"
+    }
+    if ($installed -and $installed.Debuggable) {
+        throw @"
+端末のアプリは Debug 署名です。Release の APK では上書きできません。
+入れ替えるにはアンインストールが必要で、そのとき files/ ごとゲームとセーブが消えます。
+"@
+    }
+
     Write-Host ""
     Write-Host ("APK を入れます: {0} ({1:N1} MB)" -f $apkPath, ((Get-Item $apkPath).Length / 1MB)) -ForegroundColor Cyan
     if ($PSCmdlet.ShouldProcess($Serial, "adb install -r $apkPath")) {
-        # -r は上書き。署名が違えば INSTALL_FAILED_UPDATE_INCOMPATIBLE で止まり、端末のデータには触れない
+        # -r は上書き。-d (ダウングレード) は付けない。
+        # --no-incremental: incremental install は失敗時の振る舞いが読めない (アンインストールされた例がある) ので使わない
         $ErrorActionPreference = 'Continue'
-        $out = & $adbExe -s $Serial install -r $apkPath 2>&1 | ForEach-Object { "$_" }
+        $out = & $adbExe -s $Serial install -r --no-incremental $apkPath 2>&1 | ForEach-Object { "$_" }
         $code = $LASTEXITCODE
         $ErrorActionPreference = 'Stop'
         $text = $out -join "`n"
@@ -377,7 +410,7 @@ function Send-Game {
         Invoke-Remote "rm -rf $(Quote-Sh $stageRemote)" | Out-Null
         $sw = [Diagnostics.Stopwatch]::StartNew()
         # ここは adb の進捗表示をそのまま見せる (大きいゲームは数分かかる)
-        Invoke-AdbPush $root $stageRemote
+        Invoke-AdbPush $root $stageRemote $local.Count
         Invoke-Remote "mv $(Quote-Sh $stageRemote) $(Quote-Sh $remoteDir)" | Out-Null
         Write-Host ("  送りました ({0:N0} 秒)" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
         return
@@ -500,7 +533,7 @@ function Send-Game {
         }
         Invoke-Remote "rm -rf $(Quote-Sh $stageRemote)" | Out-Null
         $sw = [Diagnostics.Stopwatch]::StartNew()
-        Invoke-AdbPush $stage $stageRemote
+        Invoke-AdbPush $stage $stageRemote $send.Count
         # -p で更新時刻を保つ (落とすと次回すべて「変更」に見える)
         Invoke-Remote "cp -rfp $(Quote-Sh "$stageRemote/.") $(Quote-Sh "$remoteDir/") && rm -rf $(Quote-Sh $stageRemote)" | Out-Null
         Write-Host ("  送りました ({0:N0} 秒)" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    PC から Android 端末へ andEmuera とゲームを入れる GUI (遊ぶ人向け)。
+    tools/deploy.ps1 と同じことを、コマンドを打たずにできるようにしたもの。
+
+    配布物 (tools/pack.ps1) には、自己完結の単一 exe として入れる。
+    遊ぶ人の PC に .NET が入っているとは限らないため。adb は exe の隣の adb/ に同梱する。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AndEmuera.Installer</RootNamespace>
+    <AssemblyName>andEmueraInstaller</AssemblyName>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+  </PropertyGroup>
+
+</Project>

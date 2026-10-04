@@ -193,6 +193,39 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
 Copy-Item $apk.FullName (Join-Path $stage "andEmuera-$Version.apk")
 
+# --- PC から端末へ入れるツール (andEmueraInstaller.exe) と adb
+# 遊ぶ人の PC に .NET や Android SDK が入っているとは限らないので、自己完結の単一 exe と adb を同梱する。
+# インストーラーは exe の隣の *.apk と adb\adb.exe を使う
+Write-Host ""
+Write-Host "インストーラーをビルド中…" -ForegroundColor Cyan
+$installerProj = Join-Path $repo 'src\andEmuera.Installer\andEmuera.Installer.csproj'
+$installerOut = Join-Path $dist '_installer'
+if (Test-Path $installerOut) { Remove-Item $installerOut -Recurse -Force }
+& dotnet publish $installerProj -c Release -r win-x64 --self-contained `
+    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
+    -p:DebugType=none -o $installerOut -v minimal
+if ($LASTEXITCODE -ne 0) { throw "インストーラーのビルドに失敗しました (終了コード $LASTEXITCODE)。" }
+Copy-Item (Join-Path $installerOut 'andEmueraInstaller.exe') $stage
+Remove-Item $installerOut -Recurse -Force
+
+$platformTools = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT,
+                   "$env:LOCALAPPDATA\Android\Sdk",
+                   "$env:ProgramFiles\Android\android-sdk",
+                   "${env:ProgramFiles(x86)}\Android\android-sdk") |
+    Where-Object { $_ } |
+    ForEach-Object { Join-Path $_ 'platform-tools' } |
+    Where-Object { Test-Path (Join-Path $_ 'adb.exe') } |
+    Select-Object -First 1
+if (-not $platformTools) { throw "Android SDK の platform-tools (adb.exe) が見つかりません。同梱できません。" }
+$adbStage = Join-Path $stage 'adb'
+New-Item -ItemType Directory -Force -Path $adbStage | Out-Null
+# adb は AOSP のもの (Apache License 2.0)。Google が platform-tools に付けている NOTICE.txt ごと入れる
+foreach ($f in 'adb.exe', 'AdbWinApi.dll', 'AdbWinUsbApi.dll', 'NOTICE.txt') {
+    Copy-Item (Join-Path $platformTools $f) $adbStage
+}
+$adbVersion = (Select-String -Path (Join-Path $platformTools 'source.properties') -Pattern 'Pkg.Revision=(.+)').Matches[0].Groups[1].Value
+Write-Host "adb: $platformTools (platform-tools $adbVersion)"
+
 # --- ライセンス表示
 $licenseDir = Join-Path $stage 'licenses'
 New-Item -ItemType Directory -Force -Path $licenseDir | Out-Null
@@ -240,6 +273,10 @@ Emuera.NET からの機能移植は EmueraEX 経由で取り込んでいます�
     libwebp         Copyright (c) Google Inc. (SkiaSharp 経由)
                     BSD 3-Clause                licenses/LibWebp.LICENSE.txt
 
+    adb (Android SDK Platform-Tools)            andEmueraInstaller.exe が使います
+                    Copyright (c) The Android Open Source Project
+                    Apache License 2.0          adb/NOTICE.txt
+
 本ソフトウェアは「現状のまま」で提供され、何らの保証もありません。
 
 このリポジトリの内容は Claude Code (Anthropic) を使って作りました。
@@ -260,7 +297,28 @@ HASH_XXH* / DICT_* / G_POLYGON_* / SQL_* / VARI,VARS と HTML_PRINT の <div>
 方言に対応しているためです (EmueraEX の統合パッチを取り込んでいます)。
 
 
-== 1. アプリを入れる ==
+== 1. かんたん転送 (おすすめ) ==
+
+andEmueraInstaller.exe を開くと、アプリの導入とゲームの転送を画面で行えます。
+
+  1. 端末で「USB デバッグ」を有効にして、USB ケーブルで PC とつなぐ
+     (手順はツールの「端末が出てこないときは」に書いてあります)
+  2. 端末の画面に「USB デバッグを許可しますか?」が出たら「許可」を押す
+  3. ツールの「andEmuera を入れる」を押す
+  4. 「フォルダを選んで送る」で、csv と erb が入っているゲームのフォルダを選ぶ
+
+2 回目からは、変わったファイルだけを送ります。
+端末で遊び進めたセーブ (sav) は、チェックを入れない限り上書きしません。
+「選んだゲームのセーブを PC に保存」で、端末のセーブを PC
+(ドキュメント\andEmuera\セーブの控え) に取り出せます。
+
+andEmueraInstaller.exe は、隣の andEmuera-{VERSION}.apk と adb フォルダを使います。
+フォルダごと置いたまま使ってください。
+
+以下は、ツールを使わずに手で入れる方法です。
+
+
+== 2. アプリを手で入れる ==
 
 andEmuera-{VERSION}.apk を端末にインストールします。
 Google Play を通していないので、「提供元不明のアプリ」の許可を求められます。
@@ -270,7 +328,7 @@ Google Play を通していないので、「提供元不明のアプリ」の�
 PC を使わない場合は、APK を端末へ転送してファイルアプリから開いてください。
 
 
-== 2. ゲームを入れる ==
+== 3. ゲームを手で入れる ==
 
 csv と erb を含むゲームフォルダを、次の場所に置きます。複数入れられます。
 
@@ -291,7 +349,7 @@ PC から adb で送ってください。
 遊ぶ途中で別のゲームに切り替えるには、アプリを再起動してください。
 
 
-== 3. セーブデータを持ち込む ==
+== 4. セーブデータを手で持ち込む ==
 
 PC で遊んでいた sav フォルダをそのまま送れば、続きから遊べます。
 
@@ -301,7 +359,7 @@ PC で遊んでいた sav フォルダをそのまま送れば、続きから遊
 端末から PC へ戻すときは adb pull です。
 
 
-== 4. フォント ==
+== 5. フォント ==
 
 等幅フォント (BIZ UDGothic) をアプリに同梱しているので、そのままで桁揃えは揃います。
 ゲームが font/ を同梱していれば、そちらが優先されます。
@@ -316,7 +374,7 @@ BIZ UDPGothic のような "P" 付きは比例フォントなので、選択肢�
 等幅でないフォントで起動した場合は、画面上部に注意書きが出ます。
 
 
-== 5. 操作 ==
+== 6. 操作 ==
 
     選択肢                タップ
     拡大                  ピンチ、または「拡大」ボタン。1 本指でパン
@@ -328,14 +386,14 @@ BIZ UDPGothic のような "P" 付きは比例フォントなので、選択肢�
 タップが通ったかどうかは、波紋の色で分かります。
 
 
-== 6. できないこと ==
+== 7. できないこと ==
 
     * 音声 (PLAYSOUND / PLAYBGM) … 未実装です
     * Plugins/*.dll の読み込み    … 未対応です
     * 辞書ポップアップ (Rikaichan) … PC 専用機能のため対象外です
 
 
-== 7. 出典 ==
+== 8. 出典 ==
 
 本ソフトウェアは Emuera および Emuera.EM+EE の改変版です。
 オリジナルの作者ではありません。詳しくは NOTICE.txt と licenses/ を見てください。

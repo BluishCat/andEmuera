@@ -91,7 +91,8 @@ dotnet build src/andEmuera.Android/andEmuera.Android.csproj -t:Install
 
 `tools/pack.ps1` が `dist/` に 2 つの zip を出します。
 
-- `andEmuera-<版>.zip` — APK・導入手順 (`README.txt`)・出典表示 (`NOTICE.txt`)・`licenses/`
+- `andEmuera-<版>.zip` — APK・かんたん転送 (`andEmueraInstaller.exe` と `adb/`)・導入手順 (`README.txt`)・出典表示 (`NOTICE.txt`)・`licenses/`。
+  `adb/` は Android SDK の `platform-tools` から取るので、Android SDK が必要です
 - `andEmuera-<版>-src.zip` — ソース一式（`upstream/` は含めない）。
   上流のライセンスが求める「改変した旨の明示」のために一緒に出します。改変の中身は `patches/`
 
@@ -164,7 +165,23 @@ Release ビルドについて 2 点:
 
 ## ゲームデータの入れ方
 
-### `tools/deploy.ps1` でまとめて入れる
+### かんたん転送（遊ぶ人向けの GUI）
+
+配布 zip の `andEmueraInstaller.exe`（`src/andEmuera.Installer`）は、1 画面で
+「端末を選ぶ → andEmuera を入れる → ゲームのフォルダを選んで送る」ができるツールです。
+.NET を同梱した単一の exe で、adb は隣の `adb/` のものを使います（無ければ PATH と Android SDK を探します）。
+
+- 端末の抜き差しを数秒おきに見て、機種・Android の版・空き容量・入っている andEmuera の版・入っているゲームを出します
+- ゲームの転送は下の `deploy.ps1` と同じ考え方です（差分だけ送る、PC 側を正とする、大文字小文字を PC に合わせる、
+  端末のセーブは上書きしない）。送る前に件数と量を確認し、約 100 MB ごとに送るので進捗と中止が効きます
+- 「セーブ (sav) も送る」を付けたときは、端末のセーブを `ドキュメント\andEmuera\セーブの控え\` に控えてから送ります。
+  端末のセーブだけを PC に取り出すこともできます
+- **アプリを入れる前に APK の AndroidManifest を読み、危ないものは adb を呼ぶ前に止めます**
+  （Debug ビルドの APK、端末より古い版、端末が Debug 版で入っている場合）。
+  古い Debug APK を `adb install -r` したら、adb が拒否された直後にアンインストールして入れ直し、
+  端末のゲームとセーブがすべて消えたことがあるためです。`--no-incremental` も付けています
+
+### `tools/deploy.ps1` でまとめて入れる（開発用）
 
 USB デバッグを有効にした端末をつないで、ゲームフォルダを渡します。
 
@@ -190,10 +207,11 @@ USB デバッグを有効にした端末をつないで、ゲームフォルダ�
 .\tools\deploy.ps1 -Apk dist\andEmuera-0.8\andEmuera-0.8.apk
 ```
 
-`-Apk` には **Debug ビルドの APK を渡さないでください。** Debug は Fast Deployment で
-アセンブリを APK の外に置くことがあり、`adb install` が成功してもコードは古いまま動きます
-（その APK は検出して止めます）。署名が端末のアプリと違う場合も止めます。
-入れ替えにはアンインストールが必要で、`files/` ごとゲームとセーブが消えるためです。
+`-Apk` は、入れる前に Android SDK の `aapt2` で APK を読み、**Debug ビルドの APK・端末より古い版・
+端末が Debug 版で入っている場合は adb を呼ばずに止めます**（`aapt2` が無ければ入れません）。
+古い Debug APK を `adb install -r` したら、拒否された直後に adb がアンインストールして入れ直し、
+`files/` ごとゲームとセーブが消えたことがあるためです。`--no-incremental` も付けています。
+Debug は Fast Deployment でアセンブリを APK の外に置くこともあり、入れてもコードが古いまま動きます。
 
 ほかに `-Font <ttf>`（共有 `fonts/` へ）、`-Serial`（複数台つないでいるとき）があります。
 adb は PATH か Android SDK の `platform-tools` から探します。
