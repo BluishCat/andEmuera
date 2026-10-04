@@ -269,7 +269,7 @@ static partial class GameSync
 
 				await Task.Run(() => FillStage(stage, batch, ct), ct);
 				await adb.ScriptAsync($"rm -rf {Adb.Q(StageRemote)}", ct);
-				await adb.CheckedAsync(ct, "push", stage, StageRemote);
+				await PushCheckedAsync(adb, stage, StageRemote, batch.Count, ct);
 				await adb.ScriptAsync(MergeScript(StageRemote, remoteDir), ct);
 				ClearDirectory(stage);
 
@@ -283,6 +283,26 @@ static partial class GameSync
 			try { Directory.Delete(stage, true); } catch { }
 			try { await adb.ScriptAsync($"rm -rf {Adb.Q(StageRemote)}", CancellationToken.None); } catch { }
 		}
+	}
+
+	/// <summary>
+	/// ディレクトリを push し、全部届いたか確かめる。adb はパスが長すぎて読めないファイル
+	/// (Windows の 260 文字制限) を「cannot lstat」と言って飛ばし、それでも終了コード 0 を返すので、
+	/// 「N files pushed」の数と出力中の adb: error を見る。
+	/// </summary>
+	static async Task PushCheckedAsync(Adb adb, string from, string to, int expected, CancellationToken ct)
+	{
+		string output = await adb.CheckedAsync(ct, "push", from, to);
+		var m = PushedRegex().Match(output);
+		int pushed = m.Success ? int.Parse(m.Groups[1].Value) : -1;
+		if (pushed == expected && !output.Contains("adb: error")) return;
+
+		var errors = output.Split('\n').Where(l => l.Contains("adb: error")).Take(5).ToList();
+		bool longPath = errors.Any(l => l.Contains("cannot lstat"));
+		throw new AdbException(
+			$"一部のファイルを送れませんでした ({expected} 個のうち {Math.Max(pushed, 0)} 個)。\n" +
+			(longPath ? "ファイルの場所 (パス) が長すぎる可能性があります。ゲームのフォルダを浅い場所 (例: D:\\era\\) に移してから送り直してください。\n" : "") +
+			string.Join('\n', errors));
 	}
 
 	/// <summary>
@@ -317,9 +337,17 @@ static partial class GameSync
 	/// </summary>
 	static string CreateLocalStage(string localRoot)
 	{
-		string name = $".andemuera-stage-{Environment.ProcessId}";
+		string name = $".aes{Environment.ProcessId}";
 		string? parent = Path.GetDirectoryName(localRoot);
-		foreach (string? dir in new[] { parent != null ? Path.Combine(parent, name) : null, Path.Combine(Path.GetTempPath(), name) })
+		string? driveRoot = Path.GetPathRoot(localRoot);
+		// パスはなるべく短くする。adb は 260 文字を超えるパスを読めない (cannot lstat で飛ばす)。
+		// ドライブ直下 (C:\ は普通は書けない) → ゲームの隣 → %TEMP% の順
+		foreach (string? dir in new[]
+		{
+			string.IsNullOrEmpty(driveRoot) ? null : Path.Combine(driveRoot, name),
+			parent != null ? Path.Combine(parent, name) : null,
+			Path.Combine(Path.GetTempPath(), name),
+		})
 		{
 			if (dir == null) continue;
 			try
@@ -399,4 +427,5 @@ static partial class GameSync
 
 	[GeneratedRegex(@"^(?i)sav/")] private static partial Regex SaveRegex();
 	[GeneratedRegex(@"^(\d+) (\d+)(?:\.\d*)? (.+)$")] private static partial Regex RemoteLineRegex();
+	[GeneratedRegex(@"(\d+) files? pushed")] private static partial Regex PushedRegex();
 }
