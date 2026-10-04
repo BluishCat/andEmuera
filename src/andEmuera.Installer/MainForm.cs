@@ -538,6 +538,8 @@ sealed class MainForm : Form
 		Log($"{plan.Name}: PC {plan.LocalCount:N0} ファイル / {FormatBytes(plan.LocalBytes)}");
 		if (plan.UpToDate)
 		{
+			// 送るものが無くても権限は直す。以前の版で送ったフォルダはアプリが読めず、起動時に落ちることがある
+			await RunBusyAsync("フォルダの権限を確かめています…", ct => GameSync.RepairAccessAsync(adb!, plan.Name, ct), refreshAfter: false);
 			string note = plan.SkippedSave > 0 ? $"\n\n(セーブ {plan.SkippedSave} ファイルは送っていません。送るなら「セーブ (sav) も送る」にチェック)" : "";
 			Log($"{plan.Name}: 端末は最新です。");
 			statusLabel.Text = $"{plan.Name} は端末と同じです。";

@@ -511,6 +511,8 @@ function Send-Game {
         Write-Host "  端末にだけあるファイルが $onlyRemote 個あります (消しません)"
     }
     if ($send.Count -eq 0 -and $renameOps.Count -eq 0) {
+        # 送るものが無くても権限は直す。以前の版で送ったフォルダはアプリが読めず、起動時に落ちることがある
+        if (-not $WhatIfPreference) { Grant-AppAccess $remoteDir -Recurse }
         Write-Host "  端末は最新です。" -ForegroundColor Green
         return
     }
