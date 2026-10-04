@@ -170,6 +170,17 @@ function Invoke-Remote {
 # sh の単一引用符で包む
 function Quote-Sh([string]$s) { "'" + $s.Replace("'", "'\''") + "'" }
 
+# adb (shell) が作ったフォルダにアプリが入れるようにする。
+# shell が作るフォルダは 2770 (持ち主 shell・グループ ext_data_rw) になり、アプリのプロセスは
+# ext_data_rw に入っていないので中を読めない。アプリを入れてから一度も起動しないうちに
+# games/ を作ってしまうと、起動するたびに UnauthorizedAccessException で落ちる (実機で起きた)。
+# 親の Android/data/<pkg> はアプリ専用 (2770) なので、中を o+rwx にしても他のアプリからは見えない。
+# アプリが作ったものは shell では chmod できないので、失敗は無視する
+function Grant-AppAccess([string]$Path, [switch]$Recurse) {
+    $r = if ($Recurse) { '-R ' } else { '' }
+    Invoke-Remote "chmod $r o+rwX $(Quote-Sh $Path) 2>/dev/null; true" | Out-Null
+}
+
 # ---------------------------------------------------------------- 端末を選ぶ
 
 $devices = @(& $adbExe devices | Select-Object -Skip 1 |
@@ -401,6 +412,8 @@ function Send-Game {
     Write-Host ("  PC: {0:N0} ファイル / {1:N1} MB" -f $local.Count, ($localBytes / 1MB))
 
     Invoke-Remote "mkdir -p $(Quote-Sh $remoteGames)" | Out-Null
+    Grant-AppAccess $remoteFiles
+    Grant-AppAccess $remoteGames
     $exists = Test-RemoteDir $remoteDir
 
     if (-not $exists) {
@@ -412,6 +425,7 @@ function Send-Game {
         # ここは adb の進捗表示をそのまま見せる (大きいゲームは数分かかる)
         Invoke-AdbPush $root $stageRemote $local.Count
         Invoke-Remote "mv $(Quote-Sh $stageRemote) $(Quote-Sh $remoteDir)" | Out-Null
+        Grant-AppAccess $remoteDir -Recurse
         Write-Host ("  送りました ({0:N0} 秒)" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
         return
     }
@@ -536,6 +550,7 @@ function Send-Game {
         Invoke-AdbPush $stage $stageRemote $send.Count
         # -p で更新時刻を保つ (落とすと次回すべて「変更」に見える)
         Invoke-Remote "cp -rfp $(Quote-Sh "$stageRemote/.") $(Quote-Sh "$remoteDir/") && rm -rf $(Quote-Sh $stageRemote)" | Out-Null
+        Grant-AppAccess $remoteDir -Recurse
         Write-Host ("  送りました ({0:N0} 秒)" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
     }
     finally {
@@ -551,6 +566,8 @@ if ($Font) {
     Write-Host ""
     Write-Host "フォント" -ForegroundColor Cyan
     Invoke-Remote "mkdir -p $(Quote-Sh "$remoteFiles/fonts")" | Out-Null
+    Grant-AppAccess $remoteFiles
+    Grant-AppAccess "$remoteFiles/fonts"
     foreach ($f in $Font) {
         if (-not (Test-Path $f)) { throw "フォントが見つかりません: $f" }
         $item = Get-Item $f

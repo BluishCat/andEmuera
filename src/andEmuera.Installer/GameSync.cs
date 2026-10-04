@@ -214,7 +214,7 @@ static partial class GameSync
 		long total = plan.SendBytes;
 		int totalFiles = plan.Send.Count;
 
-		await adb.ScriptAsync($"mkdir -p {Adb.Q(Device.GamesDir)}", ct);
+		await adb.ScriptAsync($"mkdir -p {Adb.Q(Device.GamesDir)}\n{GrantAppAccess(Device.FilesDir)}\n{GrantAppAccess(Device.GamesDir)}", ct);
 
 		if (plan.Renames.Count > 0)
 		{
@@ -228,6 +228,7 @@ static partial class GameSync
 				log($"名前を合わせる: {old} → {@new}");
 			}
 			await adb.ScriptAsync(sb.ToString(), ct);
+			if (plan.Send.Count == 0) await adb.ScriptAsync(GrantAppAccess(remoteDir, recurse: true), ct);
 		}
 
 		if (plan.BackupSave)
@@ -282,8 +283,21 @@ static partial class GameSync
 		{
 			try { Directory.Delete(stage, true); } catch { }
 			try { await adb.ScriptAsync($"rm -rf {Adb.Q(StageRemote)}", CancellationToken.None); } catch { }
+			// 途中で止めても、合流させたぶんはアプリが読めるようにしておく
+			try { await adb.ScriptAsync(GrantAppAccess(remoteDir, recurse: true), CancellationToken.None); } catch { }
 		}
 	}
+
+	/// <summary>
+	/// adb (shell) が作ったフォルダにアプリが入れるようにするコマンド。
+	/// shell が作るフォルダは 2770 (持ち主 shell・グループ ext_data_rw) になり、アプリのプロセスは
+	/// ext_data_rw に入っていないので中を読めない。アプリを入れてから一度も起動しないうちに
+	/// games/ を作ってしまうと、起動するたびに UnauthorizedAccessException で落ちる (実機で起きた)。
+	/// 親の Android/data/&lt;pkg&gt; はアプリ専用 (2770) なので、中を o+rwx にしても他のアプリからは見えない。
+	/// アプリが作ったものは shell では chmod できないので、失敗は無視する。
+	/// </summary>
+	static string GrantAppAccess(string path, bool recurse = false) =>
+		$"chmod {(recurse ? "-R " : "")}o+rwX {Adb.Q(path)} 2>/dev/null; true";
 
 	/// <summary>
 	/// ディレクトリを push し、全部届いたか確かめる。adb はパスが長すぎて読めないファイル
