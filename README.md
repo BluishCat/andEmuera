@@ -164,6 +164,42 @@ Release ビルドについて 2 点:
 
 ## ゲームデータの入れ方
 
+### `tools/deploy.ps1` でまとめて入れる
+
+USB デバッグを有効にした端末をつないで、ゲームフォルダを渡します。
+
+```powershell
+.\tools\deploy.ps1 -Game D:\egame\era\erablue_resort
+```
+
+- 端末にまだ無いゲームは**フォルダごと**送り、すでにあるゲームは**新しいファイルと変わったファイルだけ**送ります
+  （サイズが違うか、PC 側の更新時刻のほうが新しいもの。**PC 側を正とします**）。端末にだけあるファイルは消しません
+- 端末側の名前が PC と大文字小文字だけ違う場合（端末の `csv/` と PC の `CSV/` など）は、端末側を PC の綴りに改名します
+- **`sav/` は、端末にすでにあるゲームには送りません**（端末で進めたセーブを守るため）。
+  送るときは `-WithSave` を付けます。端末の `sav/` を `%USERPROFILE%\.andemuera\sav-backup\` へ控えてから送ります
+- 下に書いた adb の罠（日本語のディレクトリ名でハングする、`tar` で名前が壊れる）は避けてあります
+- `-WhatIf` を付けると、何を送るかだけ表示して何もしません
+
+アプリも一緒に入れられます。
+
+```powershell
+# 開発中: Debug でビルドして入れる (dotnet build -t:Install)
+.\tools\deploy.ps1 -Build -Game D:\egame\era\erablue_resort -Launch
+
+# 配布用の APK を入れる (adb install -r)
+.\tools\deploy.ps1 -Apk dist\andEmuera-0.8\andEmuera-0.8.apk
+```
+
+`-Apk` には **Debug ビルドの APK を渡さないでください。** Debug は Fast Deployment で
+アセンブリを APK の外に置くことがあり、`adb install` が成功してもコードは古いまま動きます
+（その APK は検出して止めます）。署名が端末のアプリと違う場合も止めます。
+入れ替えにはアンインストールが必要で、`files/` ごとゲームとセーブが消えるためです。
+
+ほかに `-Font <ttf>`（共有 `fonts/` へ）、`-Serial`（複数台つないでいるとき）があります。
+adb は PATH か Android SDK の `platform-tools` から探します。
+
+### 手で入れる
+
 `csv` と `erb` を含むゲームフォルダを、アプリ固有の外部ストレージに置きます。**複数入れられます。**
 
 ```bash
