@@ -19,7 +19,7 @@ sealed class SyncPlan
 	public int Changed { get; set; }
 	public int SkippedSave { get; set; }
 	public int OnlyRemote { get; set; }
-	/// <summary>端末にだけある ERB/CSV (端末の今の綴りの相対パス)。送る前に消す。</summary>
+	/// <summary>端末にだけある ERB/CSV/resources のファイル (端末の今の綴りの相対パス)。送る前に消す。</summary>
 	public List<string> Delete { get; } = [];
 	/// <summary>端末側の名前を PC の大文字小文字に合わせる改名 (浅い順)。</summary>
 	public List<(string Old, string New)> Renames { get; } = [];
@@ -37,10 +37,11 @@ readonly record struct SyncProgress(long DoneBytes, long TotalBytes, int DoneFil
 /// <item>端末に無ければ全部、あれば差分だけ (サイズが違うか、PC 側の更新時刻のほうが新しいもの)。PC 側を正とする</item>
 /// <item>大文字小文字だけ違う名前は、端末側を PC の綴りに改名する</item>
 /// <item>sav/ は、端末にすでにあるゲームには送らない (端末で進めたセーブを守る)。送るときは先に控える</item>
-/// <item>ERB/ と CSV/ の下は PC と同じ中身にそろえる (端末にだけあるファイルは消す)。
-/// Emuera はこの下を全部読むので、PC で消したり名前を変えたりした ERB が端末に残ると、
-/// 関数の二重定義や古い定義の読み込みで動きがおかしくなる</item>
-/// <item>それ以外の場所で端末にだけあるファイルは消さない (端末のセーブや、端末にだけ置いた画像など)</item>
+/// <item>ERB/・CSV/・resources/ の下は PC と同じ中身にそろえる (端末にだけあるファイルは消す)。
+/// Emuera は ERB/ と CSV/ の下を全部読むので、PC で消したり名前を変えたりした ERB が端末に残ると、
+/// 関数の二重定義や古い定義の読み込みで動きがおかしくなる。resources/ も画像の定義 (csv) を全部読むので、
+/// 古い定義や画像が残ると表示が食い違う</item>
+/// <item>それ以外の場所で端末にだけあるファイルは消さない (端末のセーブなど)</item>
 /// </list>
 ///
 /// adb の罠も同じように避ける。remote 側のディレクトリ名が日本語だと adb push がハングし、
@@ -231,15 +232,15 @@ static partial class GameSync
 		if (plan.Delete.Count > 0)
 		{
 			// 改名より先に消す (消す一覧は端末の今の綴りで持っている)
-			progress.Report(new(0, total, 0, totalFiles, "端末にだけある ERB / CSV を消しています…"));
+			progress.Report(new(0, total, 0, totalFiles, "端末にだけある ERB / CSV / resources のファイルを消しています…"));
 			var sb = new StringBuilder();
 			foreach (string rel in plan.Delete) sb.Append($"rm -f {Adb.Q($"{remoteDir}/{rel}")}\n");
-			// 空になったフォルダも消す。ERB/ CSV/ そのものは残す (中身が空でもアプリはフォルダの有無で判定する)
+			// 空になったフォルダも消す。ERB/ CSV/ resources/ そのものは残す (中身が空でもアプリはフォルダの有無で判定する)
 			foreach (string top in plan.Delete.Select(d => d[..d.IndexOf('/')]).Distinct(StringComparer.Ordinal))
 				sb.Append($"find {Adb.Q($"{remoteDir}/{top}")} -mindepth 1 -depth -type d -empty -delete >/dev/null 2>&1\n");
 			sb.Append("true\n");
 			await adb.ScriptAsync(sb.ToString(), ct);
-			log($"端末にだけある ERB / CSV を {plan.Delete.Count} 個消しました。");
+			log($"端末にだけある ERB / CSV / resources のファイルを {plan.Delete.Count} 個消しました。");
 			if (plan.Send.Count == 0 && plan.Renames.Count == 0) await adb.ScriptAsync(GrantAppAccess(remoteDir, recurse: true), ct);
 		}
 
@@ -476,7 +477,7 @@ static partial class GameSync
 	static extern bool CreateHardLink(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
 
 	[GeneratedRegex(@"^(?i)sav/")] private static partial Regex SaveRegex();
-	[GeneratedRegex(@"^(?i)(erb|csv)/")] private static partial Regex MirrorRegex();
+	[GeneratedRegex(@"^(?i)(erb|csv|resources)/")] private static partial Regex MirrorRegex();
 	[GeneratedRegex(@"^(\d+) (\d+)(?:\.\d*)? (.+)$")] private static partial Regex RemoteLineRegex();
 	[GeneratedRegex(@"(\d+) files? pushed")] private static partial Regex PushedRegex();
 }

@@ -565,8 +565,8 @@ sealed class MainForm : Form
 		lines.Add($"送る量: {FormatBytes(plan.SendBytes)}");
 		if (plan.Delete.Count > 0)
 		{
-			// PC で消したり名前を変えたりした ERB / CSV が端末に残っていると、Emuera が全部読んでしまい動きがおかしくなる
-			lines.Add($"端末にだけある ERB / CSV を消す: {plan.Delete.Count:N0} 個 (PC と同じ中身にそろえるため)");
+			// PC で消したり名前を変えたりした ERB / CSV / resources が端末に残っていると、Emuera が全部読んでしまい動きがおかしくなる
+			lines.Add($"端末にだけある ERB / CSV / resources のファイルを消す: {plan.Delete.Count:N0} 個 (PC と同じ中身にそろえるため)");
 			foreach (string d in plan.Delete.Take(3)) lines.Add($"    {d}");
 			if (plan.Delete.Count > 3) lines.Add("    …");
 		}
