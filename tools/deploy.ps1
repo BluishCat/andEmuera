@@ -13,8 +13,8 @@
     (相対パス・サイズ・更新時刻) を突き合わせて、新しいものと変わったものだけを送る。
     時刻は PC 側のほうが新しいときだけ差とみなす (以前 cp で入れたものは端末側の時刻が
     入れた日時に変わっているため)。
-    ERB/ と CSV/ の下は PC と同じ中身にそろえる (端末にだけあるファイルは消す)。
-    PC で消した ERB が端末に残ると、Emuera が全部読むので動きがおかしくなるため。
+    ERB/・CSV/・resources/ の下は PC と同じ中身にそろえる (端末にだけあるファイルは消す)。
+    PC で消した ERB や画像の定義が端末に残ると、Emuera が全部読むので動きや表示がおかしくなるため。
     それ以外の場所で端末にだけあるファイルは消さない (端末で作られたものかもしれないため)。
 
     adb の罠をいくつか避けている。
@@ -501,10 +501,10 @@ function Send-Game {
         if ($r) { $changed.Add($rel) } else { $added.Add($rel) }
     }
     $targets = [Collections.Generic.HashSet[string]]::new([string[]]$target.Values, [StringComparer]::Ordinal)
-    # ERB/ と CSV/ の下は PC と同じ中身にそろえる (端末にだけあるファイルは消す)。
-    # Emuera はこの下を全部読むので、PC で消したり名前を変えたりした ERB が端末に残ると、
-    # 関数の二重定義や古い定義の読み込みで動きがおかしくなる。それ以外の場所は消さない
-    $mirrorPattern = '^(?i)(erb|csv)/'
+    # ERB/・CSV/・resources/ の下は PC と同じ中身にそろえる (端末にだけあるファイルは消す)。
+    # Emuera はこの下を全部読むので、PC で消したり名前を変えたりした ERB や画像の定義が端末に残ると、
+    # 関数の二重定義や古い定義の読み込みで動きや表示がおかしくなる。それ以外の場所 (sav/ など) は消さない
+    $mirrorPattern = '^(?i)(erb|csv|resources)/'
     $remoteOnly = @($remote.Keys | Where-Object { -not $targets.Contains($_) } | Sort-Object)
     $delete = @($remoteOnly | Where-Object { $_ -match $mirrorPattern })
     $onlyRemote = @($remoteOnly | Where-Object { $_ -notmatch $mirrorPattern -and $_ -notmatch $savePattern }).Count
@@ -516,7 +516,7 @@ function Send-Game {
         Write-Host "  sav/ の $skippedSave ファイルは送りません (端末のセーブを守るため。送るなら -WithSave)" -ForegroundColor Yellow
     }
     if ($delete.Count) {
-        Write-Host "  端末にだけある ERB / CSV を $($delete.Count) 個消します (PC と同じ中身にそろえるため)" -ForegroundColor Yellow
+        Write-Host "  端末にだけある ERB / CSV / resources のファイルを $($delete.Count) 個消します (PC と同じ中身にそろえるため)" -ForegroundColor Yellow
         $delete | Select-Object -First 10 | ForEach-Object { Write-Host "    - $_" }
         if ($delete.Count -gt 10) { Write-Host "    …" }
     }
@@ -536,12 +536,12 @@ function Send-Game {
     if ($delete.Count) {
         # 改名より先に消す (消す一覧は端末の今の綴りで持っている)
         $lines = @($delete | ForEach-Object { "rm -f $(Quote-Sh "$remoteDir/$_")" })
-        # 空になったフォルダも消す。ERB/ CSV/ そのものは残す (アプリはフォルダの有無でゲームを判定する)
+        # 空になったフォルダも消す。ERB/ CSV/ resources/ そのものは残す (アプリはフォルダの有無でゲームを判定する)
         $tops = @($delete | ForEach-Object { $_.Substring(0, $_.IndexOf('/')) } | Sort-Object -Unique -CaseSensitive)
         $lines += $tops | ForEach-Object { "find $(Quote-Sh "$remoteDir/$_") -mindepth 1 -depth -type d -empty -delete >/dev/null 2>&1" }
         $lines += 'true'
         Invoke-Remote ($lines -join "`n") | Out-Null
-        Write-Host "  端末にだけある ERB / CSV を消しました。"
+        Write-Host "  端末にだけある ERB / CSV / resources のファイルを消しました。"
     }
 
     if ($renameOps.Count) {
