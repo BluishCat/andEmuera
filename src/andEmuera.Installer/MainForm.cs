@@ -504,7 +504,7 @@ sealed class MainForm : Form
 	{
 		using var dlg = new FolderBrowserDialog
 		{
-			Description = "送るゲームのフォルダを選んでください (csv と erb が入っているフォルダ)",
+			Description = "送るゲームのフォルダを選んでください (csv と erb、または Data\\csv と Data\\erb が入っているフォルダ)",
 			UseDescriptionForTitle = true,
 			InitialDirectory = lastFolder ?? "",
 		};
@@ -512,14 +512,17 @@ sealed class MainForm : Form
 		string folder = dlg.SelectedPath;
 		lastFolder = Path.GetDirectoryName(folder);
 
-		if (!GameSync.IsGameFolder(folder))
+		if (GameSync.ResolveGameFolder(folder) is not (string root, string name))
 		{
 			MessageBox.Show(this,
-				$"このフォルダには csv と erb がありません。\n{folder}\n\nEmuera の exe と同じ場所にある、csv と erb を含むフォルダを選んでください。",
+				$"このフォルダには csv と erb がありません (Data\\ の下にもありません)。\n{folder}\n\nEmuera の exe と同じ場所にある、csv と erb (または Data\\csv と Data\\erb) を含むフォルダを選んでください。",
 				Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
 			return;
 		}
-		string name = Path.GetFileName(folder.TrimEnd('\\'));
+		if (!string.Equals(root.TrimEnd('\\'), folder.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+			Log($"{name}: Data フォルダ配置のゲームです。{root} の中身を「{name}」として送ります。");
+		else if (!string.Equals(Path.GetFileName(root.TrimEnd('\\')), name, StringComparison.Ordinal))
+			Log($"{name}: Data フォルダ配置のゲームです。端末では「{name}」として送ります。");
 		if (GameSync.ValidateName(name) is { } problem)
 		{
 			MessageBox.Show(this, problem, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -531,7 +534,7 @@ sealed class MainForm : Form
 		await RunBusyAsync("送るものを調べています…", async ct =>
 		{
 			var status = new Progress<string>(s => statusLabel.Text = s);
-			plan = await GameSync.PlanAsync(adb!, folder, includeSave, status, ct);
+			plan = await GameSync.PlanAsync(adb!, root, name, includeSave, status, ct);
 		}, refreshAfter: false);
 		if (plan == null) return;
 

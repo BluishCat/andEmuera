@@ -65,6 +65,36 @@ static partial class GameSync
 		// Windows は大文字小文字を区別しないので CSV / csv のどちらでも当たる
 		Directory.Exists(Path.Combine(dir, "csv")) && Directory.Exists(Path.Combine(dir, "erb"));
 
+	/// <summary>
+	/// 選ばれたフォルダから、端末へ送る中身の場所 (Root) と端末でのゲーム名 (Name) を決める。
+	/// .NET 版 Emuera 系のバリアント (ShinEraTenseiP など) は exe の隣ではなく Data\ の下に
+	/// ERB/CSV/resources/sav を置く。PC の Emuera は Data\ をゲームの場所とみなす (patches/00) ので、
+	/// 端末にも Data\ の中身だけを「親フォルダの名前」で送る。アプリ側は直下に csv/erb があればよく、変更が要らない。
+	/// Data\ そのものを選んだ場合も親の名前を使う。どれにも当たらなければ null。
+	/// </summary>
+	public static (string Root, string Name)? ResolveGameFolder(string selected)
+	{
+		string dir = Path.GetFullPath(selected).TrimEnd('\\');
+		string name = Path.GetFileName(dir);
+		if (IsGameFolder(dir))
+		{
+			string? parent = Path.GetDirectoryName(dir);
+			// ...\ShinEraTenseiP\Data を選んだ: 親の直下に erb が無ければ Data 配置とみなして親の名前にする
+			if (name.Equals("Data", StringComparison.OrdinalIgnoreCase) && parent != null &&
+				Path.GetFileName(parent) is { Length: > 0 } parentName && !IsGameFolder(parent))
+				return (dir, parentName);
+			return (dir, name);
+		}
+		string data = Path.Combine(dir, "Data");
+		if (IsGameFolder(data))
+		{
+			// 大文字小文字は実在の綴りに合わせる (表示用)
+			data = Directory.EnumerateDirectories(dir, "data", new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive }).FirstOrDefault() ?? data;
+			return (data, name);
+		}
+		return null;
+	}
+
 	/// <summary>ゲームフォルダの名前として端末に置けるか。</summary>
 	public static string? ValidateName(string name)
 	{
@@ -113,10 +143,11 @@ static partial class GameSync
 	static async Task<bool> RemoteDirExistsAsync(Adb adb, string path, CancellationToken ct) =>
 		(await adb.ScriptAsync($"[ -d {Adb.Q(path)} ] && echo yes || echo no", ct)).Trim() == "yes";
 
-	public static async Task<SyncPlan> PlanAsync(Adb adb, string localRoot, bool includeSave, IProgress<string> status, CancellationToken ct)
+	/// <param name="localRoot">送る中身の場所 (<see cref="ResolveGameFolder"/> の Root)。</param>
+	/// <param name="name">端末でのゲームフォルダ名 (<see cref="ResolveGameFolder"/> の Name)。</param>
+	public static async Task<SyncPlan> PlanAsync(Adb adb, string localRoot, string name, bool includeSave, IProgress<string> status, CancellationToken ct)
 	{
 		localRoot = Path.GetFullPath(localRoot).TrimEnd('\\');
-		string name = Path.GetFileName(localRoot);
 		string remoteDir = $"{Device.GamesDir}/{name}";
 
 		status.Report("PC 側のファイルを数えています…");
