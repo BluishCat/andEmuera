@@ -56,9 +56,10 @@
     <PackageReference Include="SkiaSharp" Version="3.119.0" />
     <!-- 統合パッチで入った HASH_XXH3 / HASH_XXH32 用 -->
     <PackageReference Include="System.IO.Hashing" Version="9.0.0" />
-    <!-- 同じく SQL_* 用。bundle_e_sqlite3 が Android のネイティブ SQLite を持ってくる -->
+    <!-- 同じく SQL_* 用。bundle_e_sqlite3 が Android のネイティブ SQLite を持ってくる。
+         2.1.11 以前は SQLite 3.50.2 未満を同梱していて CVE-2025-6965 (GHSA-2m69-gcr7-jv3q) に当たる。2.1.14 は SQLite 3.54.0 -->
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="9.0.0" />
-    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.10" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.14" />
   </ItemGroup>
 
 </Project>
