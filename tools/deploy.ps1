@@ -396,10 +396,23 @@ function Send-Game {
 
     $root = (Resolve-Path $Path).Path.TrimEnd('\')
     $name = Split-Path -Leaf $root
-    $hasCsv = (Test-Path (Join-Path $root 'csv')) -or (Test-Path (Join-Path $root 'CSV'))
-    $hasErb = (Test-Path (Join-Path $root 'erb')) -or (Test-Path (Join-Path $root 'ERB'))
-    if (-not ($hasCsv -and $hasErb)) {
-        throw "csv と erb を含むフォルダではありません: $root"
+    # Windows の Test-Path は大文字小文字を区別しないので csv / CSV のどちらでも当たる
+    function Test-GameDir([string]$Dir) {
+        (Test-Path -LiteralPath (Join-Path $Dir 'csv') -PathType Container) -and
+        (Test-Path -LiteralPath (Join-Path $Dir 'erb') -PathType Container)
+    }
+    if (Test-GameDir $root) {
+        # ...\ShinEraTenseiP\Data を渡された: 親がゲームフォルダでなければ親の名前で送る
+        $parent = Split-Path -Parent $root
+        if ($name -ieq 'Data' -and $parent -and -not (Test-GameDir $parent)) { $name = Split-Path -Leaf $parent }
+    }
+    elseif (Test-GameDir (Join-Path $root 'Data')) {
+        # .NET 版 Emuera 系 (ShinEraTenseiP など) は Data\ の下に ERB/CSV を置く。中身を親の名前で送る
+        $root = (Get-Item -LiteralPath (Join-Path $root 'Data')).FullName.TrimEnd('\')
+        Write-Host "Data フォルダ配置のゲームです。$root の中身を「$name」として送ります。" -ForegroundColor Yellow
+    }
+    else {
+        throw "csv と erb を含むフォルダではありません (Data\ の下にもありません): $root"
     }
     if ($name -match "[`n/]") { throw "フォルダ名に使えない文字があります: $name" }
 
