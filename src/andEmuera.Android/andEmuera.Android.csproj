@@ -8,7 +8,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationId>rip.eragames.andemuera</ApplicationId>
     <ApplicationVersion>9</ApplicationVersion>
-    <ApplicationDisplayVersion>0.9</ApplicationDisplayVersion>
+    <ApplicationDisplayVersion>0.91</ApplicationDisplayVersion>
     <RootNamespace>AndEmuera</RootNamespace>
 
     <!--

@@ -106,20 +106,39 @@ static partial class GameSync
 	}
 
 	/// <summary>
+	/// 送らないフォルダ (どの階層にあっても)。バージョン管理の履歴はゲームに要らず、
+	/// .git の objects は読み取り専用で数も多い (一時フォルダを片付けられず送信が止まった)。
+	/// </summary>
+	static readonly HashSet<string> SkipDirs = new(StringComparer.OrdinalIgnoreCase) { ".git", ".svn", ".hg" };
+
+	/// <summary>
 	/// PC 側の一覧。DirectoryInfo.EnumerateFiles は FindFirstFile の結果からサイズと時刻を埋めるので、
 	/// ファイルごとの stat が要らない (HDD 上の 18 万ファイルで数十秒)。
+	/// <see cref="SkipDirs"/> の中は見に行かない (再帰を自前でして、入る前に外す)。
 	/// </summary>
 	static Dictionary<string, LocalFile> LocalIndex(string root, CancellationToken ct)
 	{
 		var index = new Dictionary<string, LocalFile>(StringComparer.Ordinal);
 		var info = new DirectoryInfo(root);
 		int prefix = info.FullName.TrimEnd('\\').Length + 1;
-		var options = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0, IgnoreInaccessible = true };
-		foreach (var f in info.EnumerateFiles("*", options))
+		var options = new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = true };
+		var dirs = new Stack<DirectoryInfo>();
+		dirs.Push(info);
+		while (dirs.Count > 0)
 		{
-			ct.ThrowIfCancellationRequested();
-			string rel = f.FullName[prefix..].Replace('\\', '/');
-			index[rel] = new LocalFile(rel, f.Length, new DateTimeOffset(f.LastWriteTimeUtc).ToUnixTimeSeconds(), f.FullName);
+			var dir = dirs.Pop();
+			foreach (var e in dir.EnumerateFileSystemInfos("*", options))
+			{
+				ct.ThrowIfCancellationRequested();
+				if (e is DirectoryInfo sub)
+				{
+					if (!SkipDirs.Contains(sub.Name)) dirs.Push(sub);
+					continue;
+				}
+				var f = (FileInfo)e;
+				string rel = f.FullName[prefix..].Replace('\\', '/');
+				index[rel] = new LocalFile(rel, f.Length, new DateTimeOffset(f.LastWriteTimeUtc).ToUnixTimeSeconds(), f.FullName);
+			}
 		}
 		return index;
 	}
@@ -454,7 +473,12 @@ static partial class GameSync
 			// 読み取り専用のファイルはハードリンクにしない (消すときに属性を外すと元のファイルまで変わる)
 			bool readOnly = (File.GetAttributes(f.FullPath) & FileAttributes.ReadOnly) != 0;
 			if (readOnly || !CreateHardLink(dst, f.FullPath, IntPtr.Zero))
+			{
 				File.Copy(f.FullPath, dst, true); // File.Copy は更新時刻を保つ
+				// 写しは読み取り専用を外す。付いたままだと ClearDirectory / Directory.Delete が
+				// 「Access to the path ... is denied」で止まる (属性を変えても更新時刻は変わらない)
+				if (readOnly) File.SetAttributes(dst, File.GetAttributes(dst) & ~FileAttributes.ReadOnly);
+			}
 		}
 	}
 
