@@ -334,17 +334,28 @@ if (-not $installed -and -not $WhatIfPreference) {
 # 端末は大文字小文字を区別するので、突き合わせも区別する (@{} は区別しない)
 function New-Index { ,[Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal) }
 
+# バージョン管理の履歴 (.git など) はどの階層でも送らない。中にも入らない
+$SkipDirs = @('.git', '.svn', '.hg')
+
 function Get-LocalIndex {
     param([string]$Root)
     $index = New-Index
     $rootInfo = [IO.DirectoryInfo]::new($Root)
     $prefix = $rootInfo.FullName.TrimEnd('\').Length + 1
-    foreach ($f in $rootInfo.EnumerateFiles('*', [IO.SearchOption]::AllDirectories)) {
-        $rel = $f.FullName.Substring($prefix).Replace('\', '/')
-        $index[$rel] = [pscustomobject]@{
-            Size = $f.Length
-            Time = [DateTimeOffset]::new($f.LastWriteTimeUtc).ToUnixTimeSeconds()
-            Full = $f.FullName
+    $dirs = [Collections.Generic.Stack[IO.DirectoryInfo]]::new()
+    $dirs.Push($rootInfo)
+    while ($dirs.Count -gt 0) {
+        $dir = $dirs.Pop()
+        foreach ($sub in $dir.EnumerateDirectories()) {
+            if ($SkipDirs -notcontains $sub.Name) { $dirs.Push($sub) }
+        }
+        foreach ($f in $dir.EnumerateFiles()) {
+            $rel = $f.FullName.Substring($prefix).Replace('\', '/')
+            $index[$rel] = [pscustomobject]@{
+                Size = $f.Length
+                Time = [DateTimeOffset]::new($f.LastWriteTimeUtc).ToUnixTimeSeconds()
+                Full = $f.FullName
+            }
         }
     }
     return $index
