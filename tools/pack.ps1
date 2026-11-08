@@ -203,7 +203,7 @@ $installerOut = Join-Path $dist '_installer'
 if (Test-Path $installerOut) { Remove-Item $installerOut -Recurse -Force }
 & dotnet publish $installerProj -c Release -r win-x64 --self-contained `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
-    -p:DebugType=none -o $installerOut -v minimal
+    -p:DebugType=none "-p:InformationalVersion=$Version" -o $installerOut -v minimal
 if ($LASTEXITCODE -ne 0) { throw "インストーラーのビルドに失敗しました (終了コード $LASTEXITCODE)。" }
 Copy-Item (Join-Path $installerOut 'andEmueraInstaller.exe') $stage
 Remove-Item $installerOut -Recurse -Force
@@ -318,6 +318,12 @@ ERB・CSV・resources (画像) は PC と同じ中身にそろえます (PC で�
 
 andEmueraInstaller.exe は、隣の andEmuera-{VERSION}.apk と adb フォルダを使います。
 フォルダごと置いたまま使ってください。
+
+新しい版が出ると、ツールの画面のいちばん上にお知らせが出ます
+(起動したときに GitHub の配布ページを確かめています)。押すと新しい zip を落として
+このフォルダの中身 (ツール・APK・adb など) を入れ替え、ツールを開き直します。
+そのあと「andEmuera を更新する」を押せば、端末のアプリも新しくなります
+(端末のゲームとセーブは消えません)。
 
 以下は、ツールを使わずに手で入れる方法です。
 
