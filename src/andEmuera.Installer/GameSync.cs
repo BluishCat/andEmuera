@@ -47,10 +47,14 @@ readonly record struct SyncProgress(long DoneBytes, long TotalBytes, int DoneFil
 /// adb の罠も同じように避ける。remote 側のディレクトリ名が日本語だと adb push がハングし、
 /// 複数ファイルを 1 回の push でディレクトリへ送ると成功表示のまま何も書かれないので、
 /// 送るものはローカルの一時フォルダに構造ごと並べ、ASCII 名のディレクトリ 1 個として送ってから端末上で合流させる。
+/// また、Android 12 以降の一部の端末 (Samsung など) では adb push が Android/data の下にフォルダを作れない
+/// (remote secure_mkdirs() failed: Operation not permitted)。adb shell の mkdir なら作れるので、
+/// 送る先のフォルダは全部 shell で先に作っておき、push にはフォルダを作らせない。
 /// </summary>
 static partial class GameSync
 {
-	const string StageRemote = Device.GamesDir + "/" + Device.StagePrefix + "stage";
+	/// <summary>以前の版が使っていた端末側の一時フォルダ。途中で止まって残っていれば消す。</summary>
+	const string LegacyStageRemote = Device.GamesDir + "/" + Device.StagePrefix + "stage";
 
 	/// <summary>1 回の push にまとめる上限。進捗と中止の細かさを決める。</summary>
 	const long BatchBytes = 96L * 1024 * 1024;
@@ -277,7 +281,18 @@ static partial class GameSync
 		long total = plan.SendBytes;
 		int totalFiles = plan.Send.Count;
 
-		await adb.ScriptAsync($"mkdir -p {Adb.Q(Device.GamesDir)}\n{GrantAppAccess(Device.FilesDir)}\n{GrantAppAccess(Device.GamesDir)}", ct);
+		// mkdir の失敗を GrantAppAccess の「; true」で隠さない (ここで作れなければ push も必ず失敗する)
+		try
+		{
+			await adb.ScriptAsync($"mkdir -p {Adb.Q(Device.GamesDir)} || exit 1\n{GrantAppAccess(Device.FilesDir)}\n{GrantAppAccess(Device.GamesDir)}", ct);
+		}
+		catch (AdbException e)
+		{
+			throw new AdbException(
+				$"端末にゲームを置くフォルダを作れませんでした:\n{Device.GamesDir}\n" +
+				"andEmuera を一度起動してから送り直してください。仕事用プロファイル・セキュアフォルダ・デュアルアプリの中に" +
+				"入れたアプリには送れません。\n\n" + e.Message);
+		}
 
 		if (plan.Delete.Count > 0)
 		{
@@ -336,10 +351,15 @@ static partial class GameSync
 		if (cur.Count > 0) batches.Add(cur);
 
 		string stage = CreateLocalStage(plan.LocalRoot);
+		// 端末側の一時フォルダはローカルと同じ名前にする。push の送り先には「すでにある games/」を渡し、
+		// adb に games/<一時フォルダ名>/ へ入れさせる (送り先がまだ無いと adb がフォルダを作りに行って失敗する端末がある)。
+		// 名前が . で始まるので、games/ の一覧 (Device の */) にもアプリの選択画面にも出ない
+		string stageRemote = $"{Device.GamesDir}/{Path.GetFileName(stage)}";
 		long doneBytes = 0;
 		int doneFiles = 0;
 		try
 		{
+			await adb.ScriptAsync($"rm -rf {Adb.Q(LegacyStageRemote)}", ct);
 			for (int b = 0; b < batches.Count; b++)
 			{
 				ct.ThrowIfCancellationRequested();
@@ -347,9 +367,9 @@ static partial class GameSync
 				progress.Report(new(doneBytes, total, doneFiles, totalFiles, $"送っています… ({b + 1}/{batches.Count})"));
 
 				await Task.Run(() => FillStage(stage, batch, ct), ct);
-				await adb.ScriptAsync($"rm -rf {Adb.Q(StageRemote)}", ct);
-				await PushCheckedAsync(adb, stage, StageRemote, batch.Count, ct);
-				await adb.ScriptAsync(MergeScript(StageRemote, remoteDir), ct);
+				await adb.ScriptAsync($"rm -rf {Adb.Q(stageRemote)}\n{MkdirsScript(stageRemote, batch)}", ct);
+				await PushCheckedAsync(adb, stage, Device.GamesDir, batch.Count, ct);
+				await adb.ScriptAsync(MergeScript(stageRemote, remoteDir), ct);
 				ClearDirectory(stage);
 
 				doneBytes += batch.Sum(f => f.Size);
@@ -360,7 +380,7 @@ static partial class GameSync
 		finally
 		{
 			try { Directory.Delete(stage, true); } catch { }
-			try { await adb.ScriptAsync($"rm -rf {Adb.Q(StageRemote)}", CancellationToken.None); } catch { }
+			try { await adb.ScriptAsync($"rm -rf {Adb.Q(stageRemote)}", CancellationToken.None); } catch { }
 			// 途中で止めても、合流させたぶんはアプリが読めるようにしておく
 			try { await adb.ScriptAsync(GrantAppAccess(remoteDir, recurse: true), CancellationToken.None); } catch { }
 		}
@@ -385,6 +405,27 @@ static partial class GameSync
 	/// </summary>
 	static string GrantAppAccess(string path, bool recurse = false) =>
 		$"chmod {(recurse ? "-R " : "")}o+rwX {Adb.Q(path)} 2>/dev/null; true";
+
+	/// <summary>
+	/// 束のファイルが入るフォルダを、端末の一時フォルダの下に全部作るスクリプト。
+	/// adbd は送り先のフォルダが無いと自分で作る (secure_mkdirs) が、Android 12 以降の一部の端末
+	/// (Samsung の One UI 4.1 以降など) では Android/data の下でこれが Operation not permitted になる。
+	/// adb shell の mkdir は通るので、先に作っておけば adbd はファイルを書くだけで済む。
+	/// </summary>
+	static string MkdirsScript(string stageRemote, List<LocalFile> batch)
+	{
+		var dirs = new SortedSet<string>(StringComparer.Ordinal) { stageRemote };
+		foreach (var f in batch)
+		{
+			int slash = f.Rel.LastIndexOf('/');
+			if (slash > 0) dirs.Add($"{stageRemote}/{f.Rel[..slash]}");
+		}
+		var sb = new StringBuilder();
+		// 1 行が長くなりすぎないよう、数十個ずつ mkdir -p に渡す
+		foreach (var chunk in dirs.Chunk(50))
+			sb.Append("mkdir -p ").AppendJoin(' ', chunk.Select(Adb.Q)).Append(" || exit 1\n");
+		return sb.ToString();
+	}
 
 	/// <summary>
 	/// ディレクトリを push し、全部届いたか確かめる。adb はパスが長すぎて読めないファイル

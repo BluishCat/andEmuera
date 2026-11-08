@@ -26,6 +26,9 @@
       * adb push --sync は全ファイルを stat するので、HDD 上の 16 万ファイルで 1 時間以上かかる
         → 使わない。一覧は .NET で取る (FindFirstFile がサイズと時刻を一緒に返すので速い)
       * tar は日本語ファイル名を CP932 で格納して壊す → 使わない
+      * Android 12 以降の一部の端末 (Samsung など) では、adb push が Android/data の下にフォルダを作れない
+        (remote secure_mkdirs() failed: Operation not permitted)
+        → 送る先のフォルダは adb shell の mkdir で全部先に作り、push には「すでにある games/」を渡す
 
     セーブ (sav/) は、端末に同じゲームがすでにあるときは送らない。
     端末で遊び進めたセーブを PC の古いセーブで上書きしないためである。
@@ -181,6 +184,75 @@ function Quote-Sh([string]$s) { "'" + $s.Replace("'", "'\''") + "'" }
 function Grant-AppAccess([string]$Path, [switch]$Recurse) {
     $r = if ($Recurse) { '-R ' } else { '' }
     Invoke-Remote "chmod $r o+rwX $(Quote-Sh $Path) 2>/dev/null; true" | Out-Null
+}
+
+# ---------------------------------------------------------------- 一時フォルダ
+
+Add-Type -Namespace AndEmuera -Name Native -MemberDefinition @'
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+[return: MarshalAs(UnmanagedType.Bool)]
+public static extern bool CreateHardLink(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
+'@
+
+# 送るものを並べるローカルの一時フォルダ。端末側の一時フォルダも同じ名前になる (games/<この名前>)。
+# . で始まるので、アプリの選択画面にもかんたん転送の一覧 (*/) にも出ない。
+# ゲームと同じドライブに作れればハードリンクで並べられる (コピーが要らない)。
+# パスはなるべく短くする (adb は 260 文字を超えるパスを読めない): ドライブ直下 → ゲームの隣 → %TEMP%
+function New-LocalStage([string]$LocalRoot) {
+    $name = ".aes$PID"
+    $candidates = @(
+        [IO.Path]::GetPathRoot($LocalRoot)
+        (Split-Path -Parent $LocalRoot)
+        $env:TEMP
+    ) | Where-Object { $_ } | ForEach-Object { Join-Path $_ $name }
+    foreach ($dir in $candidates) {
+        try {
+            if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force -WhatIf:$false }
+            $info = [IO.Directory]::CreateDirectory($dir)
+            $info.Attributes = $info.Attributes -bor [IO.FileAttributes]::Hidden
+            return $dir
+        }
+        catch { }
+    }
+    throw "一時フォルダを作れませんでした。"
+}
+
+# $Rels (/ 区切りの相対パス) を一時フォルダに構造ごと並べる。ハードリンクにできなければコピー
+# (File.Copy は更新時刻を保つので、次回の突き合わせでも一致する)
+function Add-StageFiles([string]$Stage, $Index, [string[]]$Rels) {
+    foreach ($rel in $Rels) {
+        $src = $Index[$rel].Full
+        $dst = Join-Path $Stage $rel.Replace('/', '\')
+        [IO.Directory]::CreateDirectory((Split-Path $dst)) | Out-Null
+        # 読み取り専用のファイルはハードリンクにしない (消すときに属性を外すと元のファイルまで変わる)
+        $readOnly = ([IO.File]::GetAttributes($src) -band [IO.FileAttributes]::ReadOnly) -ne 0
+        if ($readOnly -or -not [AndEmuera.Native]::CreateHardLink($dst, $src, [IntPtr]::Zero)) {
+            [IO.File]::Copy($src, $dst, $true)
+            if ($readOnly) { [IO.File]::SetAttributes($dst, [IO.File]::GetAttributes($dst) -band -bnot [IO.FileAttributes]::ReadOnly) }
+        }
+    }
+}
+
+# 一時フォルダを端末の games/<一時フォルダ名> へ送る。
+# 入るフォルダは先に shell で全部作り、push の送り先には「すでにある games/」を渡す
+# (送り先があるので adb は games/<名前>/ へ入れる)。adbd にフォルダを作らせると、
+# 一部の端末では secure_mkdirs が Operation not permitted で失敗するため
+function Send-Stage([string]$Stage, [string]$StageRemote, [string[]]$Rels) {
+    $dirs = [Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
+    $dirs.Add($StageRemote) | Out-Null
+    foreach ($rel in $Rels) {
+        $slash = $rel.LastIndexOf('/')
+        if ($slash -gt 0) { $dirs.Add("$StageRemote/$($rel.Substring(0, $slash))") | Out-Null }
+    }
+    $lines = [Collections.Generic.List[string]]::new()
+    $lines.Add("rm -rf $(Quote-Sh $StageRemote)")
+    $all = @($dirs)
+    for ($i = 0; $i -lt $all.Count; $i += 50) {
+        $chunk = $all[$i..([Math]::Min($i + 49, $all.Count - 1))]
+        $lines.Add("mkdir -p $(($chunk | ForEach-Object { Quote-Sh $_ }) -join ' ') || exit 1")
+    }
+    Invoke-Remote ($lines -join "`n") | Out-Null
+    Invoke-AdbPush $Stage $remoteGames $Rels.Count
 }
 
 # ---------------------------------------------------------------- 端末を選ぶ
@@ -430,7 +502,8 @@ function Send-Game {
     Write-Host ""
     Write-Host "ゲーム: $name" -ForegroundColor Cyan
     $remoteDir = "$remoteGames/$name"
-    $stageRemote = "$remoteGames/zz_andemuera_stage"
+    # 以前の版が使っていた端末側の一時フォルダ。途中で止まって残っていれば消す
+    $legacyStageRemote = "$remoteGames/zz_andemuera_stage"
 
     Write-Host "  PC 側の一覧を取っています…"
     $local = Get-LocalIndex $root
@@ -446,13 +519,24 @@ function Send-Game {
         # 初回はフォルダごと。sav/ もそのまま送る (端末に上書きされるセーブが無いので)
         Write-Host "  端末に無いので、フォルダごと送ります。"
         if (-not $PSCmdlet.ShouldProcess("$Serial : $remoteDir", "フォルダごと送る ($($local.Count) ファイル)")) { return }
-        Invoke-Remote "rm -rf $(Quote-Sh $stageRemote)" | Out-Null
+        # ゲームフォルダをそのまま push すると .git なども送ってしまい、送り先も adbd に作らせることになるので、
+        # 一時フォルダに (なるべくハードリンクで) 並べてから送る
         $sw = [Diagnostics.Stopwatch]::StartNew()
-        # ここは adb の進捗表示をそのまま見せる (大きいゲームは数分かかる)
-        Invoke-AdbPush $root $stageRemote $local.Count
-        Invoke-Remote "mv $(Quote-Sh $stageRemote) $(Quote-Sh $remoteDir)" | Out-Null
-        Grant-AppAccess $remoteDir -Recurse
-        Write-Host ("  送りました ({0:N0} 秒)" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
+        $stage = New-LocalStage $root
+        $stageRemote = "$remoteGames/$(Split-Path -Leaf $stage)"
+        try {
+            $all = @($local.Keys)
+            Add-StageFiles $stage $local $all
+            Invoke-Remote "rm -rf $(Quote-Sh $legacyStageRemote)" | Out-Null
+            Send-Stage $stage $stageRemote $all
+            Invoke-Remote "mv $(Quote-Sh $stageRemote) $(Quote-Sh $remoteDir)" | Out-Null
+            Grant-AppAccess $remoteDir -Recurse
+            Write-Host ("  送りました ({0:N0} 秒)" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
+        }
+        finally {
+            if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -WhatIf:$false }
+            try { Invoke-Remote "rm -rf $(Quote-Sh $stageRemote)" | Out-Null } catch { }
+        }
         return
     }
 
@@ -584,27 +668,23 @@ function Send-Game {
 
     if ($WithSave -and ($send -match $savePattern)) { Backup-RemoteSave $name }
 
-    # 差分を ASCII 名の一時フォルダに構造ごと複製し、ディレクトリ 1 個として送ってから合流させる。
-    # File.Copy は更新時刻を保つので、次回の突き合わせでも一致する
-    $stage = Join-Path $env:TEMP "andemuera-stage-$PID"
-    if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+    # 差分を ASCII 名の一時フォルダに構造ごと並べ、ディレクトリ 1 個として送ってから合流させる
+    $stage = New-LocalStage $root
+    $stageRemote = "$remoteGames/$(Split-Path -Leaf $stage)"
     try {
-        foreach ($rel in $send) {
-            # 端末側はもう PC の綴りに直っているので、PC の相対パスのまま置く
-            $dst = Join-Path $stage $rel.Replace('/', '\')
-            [IO.Directory]::CreateDirectory((Split-Path $dst)) | Out-Null
-            [IO.File]::Copy($local[$rel].Full, $dst)
-        }
-        Invoke-Remote "rm -rf $(Quote-Sh $stageRemote)" | Out-Null
+        # 端末側はもう PC の綴りに直っているので、PC の相対パスのまま置く
+        Add-StageFiles $stage $local $send
+        Invoke-Remote "rm -rf $(Quote-Sh $legacyStageRemote)" | Out-Null
         $sw = [Diagnostics.Stopwatch]::StartNew()
-        Invoke-AdbPush $stage $stageRemote $send.Count
+        Send-Stage $stage $stageRemote $send
         # -p で更新時刻を保つ (落とすと次回すべて「変更」に見える)
         Invoke-Remote "cp -rfp $(Quote-Sh "$stageRemote/.") $(Quote-Sh "$remoteDir/") && rm -rf $(Quote-Sh $stageRemote)" | Out-Null
         Grant-AppAccess $remoteDir -Recurse
         Write-Host ("  送りました ({0:N0} 秒)" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
     }
     finally {
-        if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -WhatIf:$false }
+        try { Invoke-Remote "rm -rf $(Quote-Sh $stageRemote)" | Out-Null } catch { }
     }
 }
 
