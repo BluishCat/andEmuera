@@ -172,6 +172,16 @@ Release ビルドについて 2 点:
 .NET を同梱した単一の exe で、adb は隣の `adb/` のものを使います（無ければ PATH と Android SDK を探します）。
 
 - 端末の抜き差しを数秒おきに見て、機種・Android の版・空き容量・入っている andEmuera の版・入っているゲームを出します
+- **起動時に GitHub Releases の最新版を確かめ**、新しければ画面の上にお知らせを出します。押すと配布 zip
+  （`andEmuera-<版>.zip`）を落とし、API の `digest`（SHA-256）と照らしてから exe の隣のファイルを入れ替えて開き直します
+  （`src/andEmuera.Installer/Updater.cs`）。zip に入っているファイルだけを入れ替え、古い版の APK は退けます。
+  動いている exe は消せないので `*.old-aeu` に改名し、次の起動で消します。途中で失敗したら元に戻します。
+  置き場所に書き込めない（Program Files など）ときは配布ページを開くだけです。
+  版の比較には exe の InformationalVersion（`pack.ps1` が `-p:InformationalVersion=<版>` で入れる）を使い、
+  0.83 → 0.9 のような付け方なので小数として比べます。開発中のビルド（`dev`）は同梱の APK の版で比べます。
+  **リリースには `andEmuera-<版>.zip` を `v<版>` のタグで載せてください**（この名前で探します）
+- 同梱の APK が端末の andEmuera より新しければ、「2. andEmuera」に更新できることを出します
+  （versionCode が同じなら versionName でも比べます。端末が Debug 版のときは出しません）
 - ゲームの転送は下の `deploy.ps1` と同じ考え方です（差分だけ送る、PC 側を正とする、ERB/CSV/resources は PC と同じ中身にそろえる、
   大文字小文字を PC に合わせる、端末のセーブは上書きしない）。送る前に件数と量（と消すファイル）を確認し、
   約 100 MB ごとに送るので進捗と中止が効きます

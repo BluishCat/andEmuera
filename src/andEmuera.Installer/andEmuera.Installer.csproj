@@ -17,6 +17,9 @@
     <AssemblyName>andEmueraInstaller</AssemblyName>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <!-- かんたん転送の版。配布物では pack.ps1 が -p:InformationalVersion=<版> で上書きする (自己更新の比較に使う) -->
+    <InformationalVersion>dev</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
 </Project>

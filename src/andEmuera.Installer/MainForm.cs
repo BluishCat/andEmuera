@@ -12,6 +12,10 @@ sealed class MainForm : Form
 	readonly string? bundledApk;
 	readonly ApkInfo? bundledApkInfo;
 
+	// 更新のお知らせ (新しい版があるときだけ出す)
+	readonly LinkLabel updateLink = new() { AutoSize = true, Visible = false, Padding = new Padding(0, 0, 0, 6), Font = new Font("Yu Gothic UI", 10f, FontStyle.Bold) };
+	ReleaseInfo? latestRelease;
+
 	// 1. 端末
 	readonly ComboBox deviceBox = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
 	readonly Label deviceInfo = new() { AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 4, 0, 0) };
@@ -68,6 +72,10 @@ sealed class MainForm : Form
 		WireEvents();
 		UpdateControls();
 
+		_ = Updater.CleanupAsync();
+		string? ownVersion = Updater.OwnVersion;
+		Text += ownVersion != null ? $" {ownVersion}" : " (開発版)";
+
 		if (adb == null)
 		{
 			Log("adb.exe が見つかりません。このツールに同梱の adb フォルダごと置いてください。");
@@ -82,6 +90,7 @@ sealed class MainForm : Form
 		Log(bundledApkInfo != null ? $"同梱の andEmuera: {bundledApkInfo.VersionName} ({Path.GetFileName(bundledApk)})"
 			: bundledApk != null ? $"同梱の APK を読めませんでした: {Path.GetFileName(bundledApk)}"
 			: "同梱の APK が見つかりません (「APK を選んで入れる」で選べます)。");
+		_ = CheckUpdateAsync();
 	}
 
 	// ------------------------------------------------------------ 画面
@@ -89,6 +98,7 @@ sealed class MainForm : Form
 	void BuildLayout()
 	{
 		var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, Padding = new Padding(10) };
+		root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 		root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 		root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 		root.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
@@ -137,11 +147,12 @@ sealed class MainForm : Form
 		t4.Controls.Add(statusLabel, 0, 1);
 		t4.SetColumnSpan(statusLabel, 2);
 
-		root.Controls.Add(g1, 0, 0);
-		root.Controls.Add(g2, 0, 1);
-		root.Controls.Add(g3, 0, 2);
-		root.Controls.Add(t4, 0, 3);
-		root.Controls.Add(logBox, 0, 4);
+		root.Controls.Add(updateLink, 0, 0);
+		root.Controls.Add(g1, 0, 1);
+		root.Controls.Add(g2, 0, 2);
+		root.Controls.Add(g3, 0, 3);
+		root.Controls.Add(t4, 0, 4);
+		root.Controls.Add(logBox, 0, 5);
 		Controls.Add(root);
 	}
 
@@ -172,6 +183,7 @@ sealed class MainForm : Form
 		pollTimer.Tick += async (_, _) => await PollDevicesAsync();
 		deviceBox.SelectedIndexChanged += async (_, _) => await RefreshDeviceAsync();
 		helpLink.LinkClicked += (_, _) => ShowHelp();
+		updateLink.LinkClicked += async (_, _) => await SelfUpdateAsync();
 		installButton.Click += async (_, _) => { if (bundledApk != null) await InstallAsync(bundledApk); };
 		chooseApkButton.Click += async (_, _) => await ChooseApkAsync();
 		launchButton.Click += async (_, _) => await RunBusyAsync("起動しています…", async ct =>
@@ -217,6 +229,7 @@ sealed class MainForm : Form
 		sendSaveBox.Enabled = idle;
 		backupButton.Enabled = idle && DeviceReady && gameList.SelectedItems.Count == 1;
 		cancelButton.Enabled = Busy && busyCts is { IsCancellationRequested: false };
+		updateLink.Enabled = idle;
 
 		installButton.Text = info is { AppInstalled: true } ? "andEmuera を更新する" : "andEmuera を入れる";
 		if (bundledApkInfo != null) installButton.Text += $" ({bundledApkInfo.VersionName})";
@@ -319,6 +332,8 @@ sealed class MainForm : Form
 		{
 			string kind = info.AppDebuggable ? " (開発版)" : "";
 			appInfo.Text = $"入っている版: {info.AppVersionName} (versionCode {info.AppVersionCode}){kind}";
+			if (BundledIsNewer(info))
+				appInfo.Text += $"\n→ 同梱の {bundledApkInfo!.VersionName} に更新できます。「andEmuera を更新する」を押してください (ゲームとセーブは消えません)。";
 		}
 		else
 		{
@@ -406,6 +421,113 @@ sealed class MainForm : Form
 		>= 1L << 10 => $"{b / 1024.0:0} KB",
 		_ => $"{b} B",
 	};
+
+	// ------------------------------------------------------------ かんたん転送の更新
+
+	/// <summary>
+	/// 起動時に GitHub の最新版を調べる。新しければ画面の上にお知らせを出す。
+	/// 失敗しても (オフラインなど) ログに 1 行残すだけで、ほかの操作は止めない。
+	/// </summary>
+	async Task CheckUpdateAsync()
+	{
+		// 版が埋め込まれていない開発中のビルドは、同梱の APK の版を自分の版とみなす
+		string? current = Updater.OwnVersion ?? bundledApkInfo?.VersionName;
+		if (current == null)
+		{
+			Log("開発中のビルドなので、更新は確かめません。");
+			return;
+		}
+		try
+		{
+			var rel = await Updater.GetLatestAsync(CancellationToken.None);
+			if (rel == null || Updater.Compare(rel.Version, current) <= 0)
+			{
+				Log($"かんたん転送は最新です ({current})。");
+				return;
+			}
+			latestRelease = rel;
+			updateLink.Text = $"新しい版 {rel.Version} が出ています (今は {current})。ここを押すと、かんたん転送と同梱の andEmuera を新しくします";
+			updateLink.Visible = true;
+			Log($"新しい版があります: {rel.Name}  {rel.PageUrl}");
+		}
+		catch (Exception ex)
+		{
+			Log($"更新を確かめられませんでした ({ex.Message})。");
+		}
+	}
+
+	async Task SelfUpdateAsync()
+	{
+		if (Busy || latestRelease is not { } rel) return;
+		string current = Updater.OwnVersion ?? bundledApkInfo?.VersionName ?? "?";
+
+		if (!Updater.CanWriteBaseDir())
+		{
+			if (MessageBox.Show(this,
+				$"かんたん転送が置いてあるフォルダに書き込めないため、自動では更新できません。\n{AppContext.BaseDirectory}\n\n" +
+				"配布ページを開くので、新しい zip を落として好きな場所に展開してください。",
+				Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Information) == DialogResult.OK)
+				Updater.OpenReleasePage(rel.PageUrl);
+			return;
+		}
+
+		// リリースノートの頭だけ見せる (全部は配布ページで)
+		string notes = string.Join("\n", rel.Notes.ReplaceLineEndings("\n").Split('\n').Where(l => l.Trim().Length > 0).Take(8));
+		if (notes.Length > 600) notes = notes[..600] + "…";
+		var answer = MessageBox.Show(this,
+			$"かんたん転送を {current} から {rel.Version} に更新します。\n" +
+			$"ダウンロード: {FormatBytes(rel.ZipSize)}\n\n" +
+			$"{notes}\n\n" +
+			"更新が終わるとかんたん転送を開き直します。端末の andEmuera は、開き直したあと「andEmuera を更新する」で新しくできます。\n" +
+			"端末のゲームとセーブ、PC のゲームフォルダには触りません。\n\n" +
+			"「はい」… 更新する\n「いいえ」… 配布ページを開く",
+			Text, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+		if (answer == DialogResult.No) { Updater.OpenReleasePage(rel.PageUrl); return; }
+		if (answer != DialogResult.Yes) return;
+
+		string? restartExe = null;
+		await RunBusyAsync($"andEmuera {rel.Version} を落としています…", async ct =>
+		{
+			progressBar.Style = ProgressBarStyle.Blocks;
+			progressBar.Maximum = 1000;
+			progressBar.Value = 0;
+			var progress = new Progress<(long Done, long Total)>(p =>
+			{
+				progressBar.Value = p.Total > 0 ? (int)Math.Min(1000, 1000 * p.Done / p.Total) : 0;
+				statusLabel.Text = $"andEmuera {rel.Version} を落としています…  {FormatBytes(p.Done)} / {FormatBytes(p.Total)}";
+			});
+			string zip = await Updater.DownloadAsync(rel, progress, ct);
+			ct.ThrowIfCancellationRequested();
+
+			statusLabel.Text = "ファイルを入れ替えています…";
+			// 古い adb のサーバーが残っていると、新しい adb と版が食い違うので止めておく
+			if (adb != null) { try { await adb.CheckedAsync(CancellationToken.None, "kill-server"); } catch { } }
+			restartExe = await Task.Run(() => Updater.Apply(zip));
+			Log($"かんたん転送を {rel.Version} に更新しました。開き直します。");
+		}, refreshAfter: false);
+
+		if (restartExe == null) return;
+		try
+		{
+			Updater.Restart(restartExe);
+		}
+		catch (Exception ex)
+		{
+			MessageBox.Show(this, $"更新は済みましたが、開き直せませんでした。もう一度開いてください。\n{ex.Message}", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+		}
+		Close();
+	}
+
+	/// <summary>
+	/// 同梱の APK が端末のアプリより新しいか。0.9 → 0.91 のように versionCode を据え置いた版もあるので、
+	/// versionCode が同じときは versionName でも比べる。端末が開発版 (Debug 署名) なら同梱の APK では上書きできないので出さない。
+	/// </summary>
+	bool BundledIsNewer(DeviceInfo device)
+	{
+		if (bundledApkInfo == null || bundledApkInfo.Debuggable || device.AppDebuggable || !long.TryParse(device.AppVersionCode, out long code)) return false;
+		if (bundledApkInfo.VersionCode != code) return bundledApkInfo.VersionCode > code;
+		return device.AppVersionName != null && Updater.Compare(bundledApkInfo.VersionName, device.AppVersionName) > 0;
+	}
 
 	// ------------------------------------------------------------ 2. アプリ
 
