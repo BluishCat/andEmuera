@@ -387,6 +387,28 @@ static partial class GameSync
 	}
 
 	/// <summary>
+	/// 端末の games/ からゲームのフォルダを丸ごと消す。セーブも消えるので、控えるかどうかは呼ぶ側で決める。
+	/// 名前は一覧 (games/*/) から来たものだけを想定しているが、games/ の外や games/ 自体を消さないよう念のため確かめる。
+	/// アプリが作ったファイルも FUSE 越しには shell (ext_data_rw) の持ち物に見えるので rm で消せる。
+	/// 消し残しがあれば例外にする。
+	/// </summary>
+	public static async Task DeleteGameAsync(Adb adb, string gameName, CancellationToken ct)
+	{
+		if (gameName.Length == 0 || gameName is "." or ".." || gameName.Contains('/') || gameName.Contains('\n') || ValidateName(gameName) != null)
+			throw new AdbException($"このフォルダ名は消せません: {gameName}");
+		string dir = $"{Device.GamesDir}/{gameName}";
+		string r = await adb.ScriptAsync($$"""
+			d={{Adb.Q(dir)}}
+			[ -d "$d" ] || { echo missing; exit 0; }
+			rm -rf "$d"
+			if [ -e "$d" ]; then echo left; exit 1; fi
+			echo ok
+			""", ct);
+		if (r.Trim() == "missing")
+			throw new AdbException($"端末に「{gameName}」はもうありません。");
+	}
+
+	/// <summary>
 	/// 端末のゲームのフォルダにアプリが入れるようにする。送るものが無いときに呼ぶ
 	/// (以前の版で送ったフォルダは権限が付いておらず、アプリが起動時に落ちることがある)。
 	/// </summary>

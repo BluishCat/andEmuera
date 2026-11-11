@@ -37,6 +37,12 @@ sealed class MainForm : Form
 	readonly Button resendButton = new() { AutoSize = true, Text = "選んだゲームを送り直す" };
 	readonly CheckBox sendSaveBox = new() { AutoSize = true, Text = "セーブ (sav) も送る" };
 	readonly Button backupButton = new() { AutoSize = true, Text = "選んだゲームのセーブを PC に保存" };
+	// 一覧の右クリック
+	readonly ContextMenuStrip gameMenu = new();
+	readonly ToolStripMenuItem menuResend = new("送り直す") { Font = new Font("Yu Gothic UI", 10f, FontStyle.Bold) };
+	readonly ToolStripMenuItem menuOpenFolder = new("送った PC のフォルダを開く");
+	readonly ToolStripMenuItem menuBackup = new("セーブを PC に保存");
+	readonly ToolStripMenuItem menuDelete = new("端末から削除…");
 
 	// 下段
 	readonly ProgressBar progressBar = new() { Dock = DockStyle.Fill, Height = 22 };
@@ -137,6 +143,8 @@ sealed class MainForm : Form
 		gameList.Columns.Add("端末に入っているゲーム", 200);
 		gameList.Columns.Add("状態", 150);
 		gameList.Columns.Add("送った PC のフォルダ", 360);
+		gameMenu.Items.AddRange([menuResend, menuOpenFolder, menuBackup, new ToolStripSeparator(), menuDelete]);
+		gameList.ContextMenuStrip = gameMenu;
 		t3.Controls.Add(gameList, 0, 1);
 		t3.Controls.Add(Flow(backupButton), 0, 2);
 		g3.Controls.Add(t3);
@@ -197,6 +205,27 @@ sealed class MainForm : Form
 		sendButton.Click += async (_, _) => await SendGameAsync();
 		resendButton.Click += async (_, _) => await ResendSelectedAsync();
 		gameList.ItemActivate += async (_, _) => await ResendSelectedAsync(); // ダブルクリック / Enter
+		gameList.KeyDown += async (_, e) => { if (e.KeyCode == Keys.Delete) { e.Handled = true; await DeleteSelectedAsync(); } };
+		gameMenu.Opening += (_, e) =>
+		{
+			// ゲームを選んでいるときだけ出す。右クリックした行は ListView が先に選んでくれる
+			// (空いている所や「まだ何も入っていません」では選択が無いので出さない)
+			if (SelectedGame is not { } g) { e.Cancel = true; return; }
+			bool ok = !Busy && DeviceReady;
+			menuResend.Enabled = ok;
+			menuOpenFolder.Enabled = settings.FolderOf(g.Name) is { } f && Directory.Exists(f);
+			menuBackup.Enabled = ok;
+			menuDelete.Enabled = ok;
+			menuDelete.Text = $"「{g.Name}」を端末から削除…";
+		};
+		menuResend.Click += async (_, _) => await ResendSelectedAsync();
+		menuOpenFolder.Click += (_, _) =>
+		{
+			if (SelectedGame is { } g && settings.FolderOf(g.Name) is { } f && Directory.Exists(f))
+				Process.Start(new ProcessStartInfo("explorer.exe", $"\"{f}\"") { UseShellExecute = true });
+		};
+		menuBackup.Click += async (_, _) => await BackupAsync();
+		menuDelete.Click += async (_, _) => await DeleteSelectedAsync();
 		backupButton.Click += async (_, _) => await BackupAsync();
 		gameList.SelectedIndexChanged += (_, _) => UpdateControls();
 		cancelButton.Click += (_, _) =>
@@ -780,6 +809,47 @@ sealed class MainForm : Form
 			string msg = $"{plan.Name} を送りました ({FormatBytes(plan.SendBytes)}, {sw.Elapsed.TotalSeconds:0} 秒)。";
 			Log(msg);
 			statusLabel.Text = msg + (info is { AppInstalled: true } ? " 「andEmuera を起動」で遊べます。" : "");
+		});
+	}
+
+	/// <summary>
+	/// 一覧で選んだゲームを端末から消す。セーブも消えるので、既定では PC に控えてから消す。
+	/// PC のフォルダは消さない。送り元として覚えたフォルダもそのまま (送り直せばまた入る)。
+	/// </summary>
+	async Task DeleteSelectedAsync()
+	{
+		if (Busy || !DeviceReady || SelectedGame is not { } game) return;
+		var answer = MessageBox.Show(this,
+			$"「{game.Name}」を端末から削除します。ゲームのファイルとセーブ (sav) がすべて消え、元に戻せません。\n" +
+			"PC のゲームフォルダには触りません。andEmuera でこのゲームを開いているなら、先に閉じてください。\n\n" +
+			$"セーブを先に PC に控えますか?\n(控え先: {GameSync.BackupRoot})\n\n" +
+			"「はい」… セーブを控えてから削除する\n「いいえ」… 控えずに削除する",
+			Text, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button1);
+		if (answer == DialogResult.Cancel) return;
+		if (answer == DialogResult.No && MessageBox.Show(this,
+				$"セーブを控えずに「{game.Name}」を削除します。端末で進めたセーブは戻せません。よろしいですか?",
+				Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.OK)
+			return;
+
+		await RunBusyAsync($"{game.Name} を削除しています…", async ct =>
+		{
+			if (answer == DialogResult.Yes)
+			{
+				statusLabel.Text = $"{game.Name} のセーブを PC に控えています…";
+				try
+				{
+					string saved = await GameSync.BackupSaveAsync(adb!, game.Name, ct);
+					Log($"セーブを控えました: {saved}");
+				}
+				catch (AdbException ex) when (ex.Message.Contains("ありません"))
+				{
+					Log($"{game.Name}: セーブが無いので、控えずに削除します。");
+				}
+				statusLabel.Text = $"{game.Name} を削除しています…";
+			}
+			await GameSync.DeleteGameAsync(adb!, game.Name, ct);
+			Log($"{game.Name} を端末から削除しました。");
+			statusLabel.Text = $"{game.Name} を端末から削除しました。";
 		});
 	}
 
