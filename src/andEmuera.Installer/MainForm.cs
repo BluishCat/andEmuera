@@ -34,6 +34,7 @@ sealed class MainForm : Form
 		Dock = DockStyle.Fill, HideSelection = false,
 	};
 	readonly Button sendButton = new() { AutoSize = true, Text = "フォルダを選んで送る…" };
+	readonly Button resendButton = new() { AutoSize = true, Text = "選んだゲームを送り直す" };
 	readonly CheckBox sendSaveBox = new() { AutoSize = true, Text = "セーブ (sav) も送る" };
 	readonly Button backupButton = new() { AutoSize = true, Text = "選んだゲームのセーブを PC に保存" };
 
@@ -51,7 +52,8 @@ sealed class MainForm : Form
 	bool polling;
 	List<AdbDevice> devices = [];
 	DeviceInfo? info;
-	string? lastFolder;
+	/// <summary>ゲームごとの PC のフォルダなど。送るたびに保存する。</summary>
+	readonly Settings settings = Settings.Load();
 	/// <summary>読み直しの世代。抜き差しで読み直しが重なったとき、古いほうの結果を捨てる。</summary>
 	int refreshGen;
 	bool closeAfterBusy;
@@ -131,9 +133,10 @@ sealed class MainForm : Form
 		t3.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 		t3.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 		t3.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-		t3.Controls.Add(Flow(sendButton, sendSaveBox), 0, 0);
-		gameList.Columns.Add("端末に入っているゲーム", 420);
-		gameList.Columns.Add("状態", 220);
+		t3.Controls.Add(Flow(sendButton, resendButton, sendSaveBox), 0, 0);
+		gameList.Columns.Add("端末に入っているゲーム", 200);
+		gameList.Columns.Add("状態", 150);
+		gameList.Columns.Add("送った PC のフォルダ", 360);
 		t3.Controls.Add(gameList, 0, 1);
 		t3.Controls.Add(Flow(backupButton), 0, 2);
 		g3.Controls.Add(t3);
@@ -192,6 +195,8 @@ sealed class MainForm : Form
 			Log("andEmuera を起動しました。");
 		});
 		sendButton.Click += async (_, _) => await SendGameAsync();
+		resendButton.Click += async (_, _) => await ResendSelectedAsync();
+		gameList.ItemActivate += async (_, _) => await ResendSelectedAsync(); // ダブルクリック / Enter
 		backupButton.Click += async (_, _) => await BackupAsync();
 		gameList.SelectedIndexChanged += (_, _) => UpdateControls();
 		cancelButton.Click += (_, _) =>
@@ -217,6 +222,7 @@ sealed class MainForm : Form
 	bool Busy => busyCts != null;
 	AdbDevice? SelectedDevice => deviceBox.SelectedItem as AdbDevice;
 	bool DeviceReady => adb != null && SelectedDevice is { Ready: true } && info != null;
+	RemoteGame? SelectedGame => gameList.SelectedItems.Count == 1 ? gameList.SelectedItems[0].Tag as RemoteGame : null;
 
 	void UpdateControls()
 	{
@@ -226,6 +232,7 @@ sealed class MainForm : Form
 		chooseApkButton.Enabled = idle && DeviceReady;
 		launchButton.Enabled = idle && DeviceReady && info!.AppInstalled;
 		sendButton.Enabled = idle && DeviceReady;
+		resendButton.Enabled = idle && DeviceReady && SelectedGame != null;
 		sendSaveBox.Enabled = idle;
 		backupButton.Enabled = idle && DeviceReady && gameList.SelectedItems.Count == 1;
 		cancelButton.Enabled = Busy && busyCts is { IsCancellationRequested: false };
@@ -344,8 +351,12 @@ sealed class MainForm : Form
 		gameList.Items.Clear();
 		foreach (var g in info.Games)
 		{
-			var item = new ListViewItem(g.Name) { Tag = g };
+			var item = new ListViewItem(g.Name) { Tag = g, UseItemStyleForSubItems = false };
 			item.SubItems.Add(g.Playable ? "遊べます" : "csv / erb が見つかりません");
+			string? folder = settings.FolderOf(g.Name);
+			var sub = item.SubItems.Add(folder == null ? "(未登録 — 送り直すときに選びます)"
+				: Directory.Exists(folder) ? folder : $"(見つかりません) {folder}");
+			if (folder == null || !Directory.Exists(folder)) sub.ForeColor = SystemColors.GrayText;
 			gameList.Items.Add(item);
 		}
 		gameList.EndUpdate();
@@ -622,17 +633,51 @@ sealed class MainForm : Form
 
 	// ------------------------------------------------------------ 3. ゲーム
 
-	async Task SendGameAsync()
+	/// <summary>
+	/// 一覧で選んだゲームを、前に送ったときの PC のフォルダから送り直す。
+	/// 覚えていない・フォルダが無くなっているときは、フォルダを選んでもらう。
+	/// </summary>
+	async Task ResendSelectedAsync()
 	{
-		using var dlg = new FolderBrowserDialog
+		if (Busy || !DeviceReady || SelectedGame is not { } game) return;
+		string? folder = settings.FolderOf(game.Name);
+		if (folder != null && Directory.Exists(folder))
 		{
-			Description = "送るゲームのフォルダを選んでください (csv と erb、または Data\\csv と Data\\erb が入っているフォルダ)",
-			UseDescriptionForTitle = true,
-			InitialDirectory = lastFolder ?? "",
-		};
-		if (dlg.ShowDialog(this) != DialogResult.OK) return;
-		string folder = dlg.SelectedPath;
-		lastFolder = Path.GetDirectoryName(folder);
+			Log($"{game.Name}: 前に送ったフォルダから送ります: {folder}");
+			await SendGameAsync(folder, game.Name);
+			return;
+		}
+		string why = folder == null
+			? $"「{game.Name}」をどの PC のフォルダから送ったか、まだ覚えていません。"
+			: $"「{game.Name}」を前に送った PC のフォルダが見つかりません。\n{folder}";
+		if (MessageBox.Show(this, $"{why}\n\n送るフォルダを選んでください。次からはそこから送り直せます。",
+				Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
+			return;
+		await SendGameAsync(null, game.Name);
+	}
+
+	/// <param name="folder">送る PC のフォルダ。null ならフォルダ選択画面を出す。</param>
+	/// <param name="expectedName">送り直すゲームの名前 (一覧で選んだもの)。選んだフォルダの名前と違えば確かめる。</param>
+	async Task SendGameAsync(string? folder = null, string? expectedName = null)
+	{
+		if (folder == null)
+		{
+			// 送り直しで選び直すときは、前のフォルダの親から開く (フォルダ名を変えた・移したときに近い場所から探せる)
+			string? start = expectedName != null && settings.FolderOf(expectedName) is { } old ? Path.GetDirectoryName(old) : null;
+			if (start == null || !Directory.Exists(start)) start = settings.LastFolder;
+			using var dlg = new FolderBrowserDialog
+			{
+				Description = expectedName != null
+					? $"「{expectedName}」のフォルダを選んでください (csv と erb、または Data\\csv と Data\\erb が入っているフォルダ)"
+					: "送るゲームのフォルダを選んでください (csv と erb、または Data\\csv と Data\\erb が入っているフォルダ)",
+				UseDescriptionForTitle = true,
+				InitialDirectory = start != null && Directory.Exists(start) ? start : "",
+			};
+			if (dlg.ShowDialog(this) != DialogResult.OK) return;
+			folder = dlg.SelectedPath;
+			settings.LastFolder = Path.GetDirectoryName(folder.TrimEnd('\\'));
+			settings.Save();
+		}
 
 		if (GameSync.ResolveGameFolder(folder) is not (string root, string name))
 		{
@@ -650,6 +695,13 @@ sealed class MainForm : Form
 			MessageBox.Show(this, problem, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
 			return;
 		}
+		// 送り直しのつもりで別のゲームを選んだ: そのまま送ると、端末には別の名前のゲームとして増える
+		if (expectedName != null && !string.Equals(name, expectedName, StringComparison.Ordinal) &&
+			MessageBox.Show(this,
+				$"選んだフォルダは、端末では「{name}」として送られます (一覧で選んでいたのは「{expectedName}」)。\n{folder}\n\n" +
+				$"「{expectedName}」は上書きされず、「{name}」が別に入ります。続けますか?",
+				Text, MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) != DialogResult.OK)
+			return;
 
 		bool includeSave = sendSaveBox.Checked;
 		SyncPlan? plan = null;
@@ -661,6 +713,8 @@ sealed class MainForm : Form
 		if (plan == null) return;
 
 		Log($"{plan.Name}: PC {plan.LocalCount:N0} ファイル / {FormatBytes(plan.LocalBytes)}");
+		// 調べられた (= 送れるフォルダだった) 時点で、このゲームの送り元として覚える
+		RememberFolder(plan.Name, folder);
 		if (plan.UpToDate)
 		{
 			// 送るものが無くても権限は直す。以前の版で送ったフォルダはアプリが読めず、起動時に落ちることがある
@@ -727,6 +781,15 @@ sealed class MainForm : Form
 			Log(msg);
 			statusLabel.Text = msg + (info is { AppInstalled: true } ? " 「andEmuera を起動」で遊べます。" : "");
 		});
+	}
+
+	void RememberFolder(string gameName, string folder)
+	{
+		string full = Path.GetFullPath(folder).TrimEnd('\\');
+		if (settings.FolderOf(gameName) == full) return;
+		settings.GameFolders[gameName] = full;
+		settings.Save();
+		Log($"{gameName}: 送り元のフォルダを覚えました ({full})。次からは一覧で選んで「送り直す」(またはダブルクリック) で送れます。");
 	}
 
 	async Task BackupAsync()
