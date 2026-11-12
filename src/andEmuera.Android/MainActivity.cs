@@ -1,6 +1,6 @@
 // andEmuera: Android 側のエントリポイント。
 //
-// やることは 3 つだけ:
+// やることは 3 つだけ (ほかに、起動時の更新確認を AppUpdater に任せている):
 //   1. 端末のフォントを Emuera.Core に教える (Android に Windows のフォントは無い)
 //   2. ゲームフォルダを探して EmueraWebHost を起動する
 //   3. 全画面の WebView をローカルサーバーに繋ぐ
@@ -34,6 +34,7 @@ public class MainActivity : Activity
 	WebView webView;
 	TextView statusView;
 	EmueraWebHost host;
+	AppUpdater updater;
 
 	protected override void OnCreate(Bundle savedInstanceState)
 	{
@@ -77,6 +78,10 @@ public class MainActivity : Activity
 
 		// CALLSHARP LAUNCH_BROWSER の内蔵実装から呼ばれる
 		MinorShift.Emuera.Runtime.Utils.PluginSystem.BuiltinPlugins.BrowserLauncher = OpenUrl;
+
+		// 新しい版が出ていれば尋ねる (裏で調べるので起動は待たせない)
+		updater = new AppUpdater(this);
+		updater.CheckOnStartup();
 
 		var games = FindGames(out string message);
 		if (games.Count == 0)
@@ -483,6 +488,13 @@ public class MainActivity : Activity
 	{
 		// 誤操作で終了しないよう、バックキーはホームへ戻す扱いにする
 		MoveTaskToBack(true);
+	}
+
+	protected override void OnResume()
+	{
+		base.OnResume();
+		// 「この提供元のアプリを許可」の設定画面から戻ってきたとき、更新の続きをする
+		updater?.OnResume();
 	}
 
 	protected override void OnDestroy()

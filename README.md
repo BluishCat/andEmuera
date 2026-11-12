@@ -155,6 +155,24 @@ java.lang.UnsatisfiedLinkError: No implementation found for void ...MainActivity
 **リリースのたびに `andEmuera.Android.csproj` の `ApplicationVersion`（versionCode）を +1 してください。**
 これを上げないと、端末側が更新版と認識しません。表示用の版は `ApplicationDisplayVersion` です。
 
+### アプリの自己更新（0.94〜）
+
+アプリは起動するたびに裏で GitHub Releases の最新版を確かめます（`src/andEmuera.Android/AppUpdater.cs`）。
+
+- リリースに付いた `andEmuera-update.json`（`{"versionName":"0.94","versionCode":10,"apk":"andEmuera-0.94.apk"}`）の
+  **versionCode** が端末より大きければ「更新する / この版は入れない / あとで」を尋ねます。かんたん転送だけのリリースは
+  versionCode が同じなので知らせません。「あとで」は 24 時間、「この版は入れない」はその versionCode を知らせません
+- 「更新する」で APK 単体（`andEmuera-<版>.apk`）を落とし、大きさと API の `digest`（SHA-256）を確かめます。
+  digest の無い APK は入れません。入っているアプリと署名が違えば（Debug 版など）、上書きできない理由を出して止めます
+- `PackageInstaller` のセッションで入れるので、Android の確認画面で「更新」を押せば入れ替わります。初回は
+  「この提供元のアプリを許可」（`REQUEST_INSTALL_PACKAGES`）をオンにしてもらいます。Android 12 以降は
+  `USER_ACTION_NOT_REQUIRED` を付けているので、アプリ自身が入れた版からの更新は確認なしで済むことがあります
+- 端末の andEmuera が Debug 版なら、配布版で上書きできないことと配布ページだけを知らせます
+- 通信先は `api.github.com` と GitHub のリリースファイル置き場だけです。ゲームの中身やセーブは送りません
+
+`pack.ps1` が `dist/` に APK と `andEmuera-update.json` も書くので、**リリースには zip と一緒にこの 2 つも載せてください**。
+無いと端末のアプリは新しい版に気づけません。
+
 Release ビルドについて 2 点:
 
 - **トリミングと AOT は入れられません。** Emuera は識別子の解決やプラグイン機構で
