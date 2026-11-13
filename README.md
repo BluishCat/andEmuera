@@ -167,7 +167,7 @@ java.lang.UnsatisfiedLinkError: No implementation found for void ...MainActivity
 - `PackageInstaller` のセッションで入れるので、Android の確認画面で「更新」を押せば入れ替わります。初回は
   「この提供元のアプリを許可」（`REQUEST_INSTALL_PACKAGES`）をオンにしてもらいます。Android 12 以降は
   `USER_ACTION_NOT_REQUIRED` を付けているので、アプリ自身が入れた版からの更新は確認なしで済むことがあります
-- 端末の andEmuera が Debug 版なら、配布版で上書きできないことと配布ページだけを知らせます
+- Debug ビルド（開発版）は確かめません
 - 通信先は `api.github.com` と GitHub のリリースファイル置き場だけです。ゲームの中身やセーブは送りません
 
 `pack.ps1` が `dist/` に APK と `andEmuera-update.json` も書くので、**リリースには zip と一緒にこの 2 つも載せてください**。

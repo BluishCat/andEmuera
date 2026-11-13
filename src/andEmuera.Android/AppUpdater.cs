@@ -84,6 +84,14 @@ sealed class AppUpdater
 		try { if (Directory.Exists(UpdateDir)) Directory.Delete(UpdateDir, true); }
 		catch (Exception ex) { Android.Util.Log.Warn(LogTag, $"更新の残りを消せません: {ex.Message}"); }
 
+		// 開発版 (Debug、パッケージ名 .debug) は配布版と別のアプリなので、配布版の APK では更新できない。
+		// 版も main から入れ直すものなので、確かめない
+		if (IsDebugBuild)
+		{
+			Android.Util.Log.Info(LogTag, "更新確認: 開発版なので確かめません");
+			return;
+		}
+
 		long snoozeUntil = Preferences.GetLong(PrefSnoozeUntil, 0);
 		if (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < snoozeUntil)
 			return;
@@ -177,10 +185,7 @@ sealed class AppUpdater
 
 	string OwnVersionName() => activity.PackageManager.GetPackageInfo(activity.PackageName, 0).VersionName;
 
-	/// <summary>
-	/// 開発用 (Debug 署名) のビルドか。配布版の APK とは署名が違うので上書きできない
-	/// (入れ替えるにはアンインストールが要り、そのとき端末のゲームとセーブが消える)。
-	/// </summary>
+	/// <summary>開発用 (Debug) のビルドか。配布版とは署名もパッケージ名も違う別のアプリ。</summary>
 	bool IsDebugBuild => (activity.ApplicationInfo.Flags & ApplicationInfoFlags.Debuggable) != 0;
 
 	// ------------------------------------------------------------ 尋ねる
@@ -194,30 +199,15 @@ sealed class AppUpdater
 		var builder = new AlertDialog.Builder(activity)
 			.SetTitle($"andEmuera {rel.VersionName} が出ています");
 
-		if (IsDebugBuild)
-		{
-			builder
-				.SetMessage(
-					$"いまの版: {OwnVersionName()}\n新しい版: {rel.VersionName}\n\n" +
-					"この端末の andEmuera は開発用 (Debug 署名) なので、配布版で上書き更新できません。" +
-					"配布版に入れ替えるにはアンインストールが必要で、そのとき端末のゲームとセーブが消えます。" +
-					"先にセーブを PC へ控えてから入れ替えてください。")
-				.SetPositiveButton("配布ページを開く", (s, e) => OpenPage(rel.PageUrl))
-				.SetNeutralButton("この版は知らせない", (s, e) => Skip(rel))
-				.SetNegativeButton("閉じる", (s, e) => Snooze());
-		}
-		else
-		{
-			builder
-				.SetMessage(
-					$"いまの版: {OwnVersionName()}\n新しい版: {rel.VersionName} ({sizeText})\n\n" +
-					"更新すると、Android の確認画面のあとにアプリがいったん終わります。" +
-					"遊んでいる途中なら、セーブしてから更新してください。\n" +
-					"端末のゲームとセーブはそのまま残ります。")
-				.SetPositiveButton("更新する", (s, e) => _ = DownloadAndInstallAsync(rel))
-				.SetNeutralButton("この版は入れない", (s, e) => Skip(rel))
-				.SetNegativeButton("あとで", (s, e) => Snooze());
-		}
+		builder
+			.SetMessage(
+				$"いまの版: {OwnVersionName()}\n新しい版: {rel.VersionName} ({sizeText})\n\n" +
+				"更新すると、Android の確認画面のあとにアプリがいったん終わります。" +
+				"遊んでいる途中なら、セーブしてから更新してください。\n" +
+				"端末のゲームとセーブはそのまま残ります。")
+			.SetPositiveButton("更新する", (s, e) => _ = DownloadAndInstallAsync(rel))
+			.SetNeutralButton("この版は入れない", (s, e) => Skip(rel))
+			.SetNegativeButton("あとで", (s, e) => Snooze());
 		builder.SetCancelable(true).SetOnCancelListener(new CancelListener(Snooze)).Show();
 	}
 
@@ -225,18 +215,6 @@ sealed class AppUpdater
 
 	void Snooze() => Preferences.Edit()
 		.PutLong(PrefSnoozeUntil, DateTimeOffset.UtcNow.Add(SnoozeSpan).ToUnixTimeMilliseconds()).Apply();
-
-	void OpenPage(string url)
-	{
-		try
-		{
-			activity.StartActivity(new Intent(Intent.ActionView, Android.Net.Uri.Parse(url)));
-		}
-		catch (Exception ex)
-		{
-			Android.Util.Log.Error(LogTag, $"配布ページを開けません: {ex.Message}");
-		}
-	}
 
 	sealed class CancelListener(Action onCancel) : Java.Lang.Object, IDialogInterfaceOnCancelListener
 	{
