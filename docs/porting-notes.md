@@ -1,7 +1,7 @@
 # 移植メモ — Windows 依存の実態と切り分け
 
 対象上流: `upstream/emuera.em` (GitLab EvilMask/emuera.em)
-ベース: HEAD `2175f8a` (2026-07-25) / 手元 exe は `cde11d6` (2025-11-14, EEv55)
+ベース: HEAD `9608cf6` (2026-10-31, EEv57) / 手元 exe は `cde11d6` (2025-11-14, EEv55)
 
 調査・移植・実機での検証は [Claude Code](https://claude.com/claude-code)（Anthropic）を使って行った。
 
