@@ -98,7 +98,9 @@ if (-not $SkipBuild) {
     }
 }
 
-[xml]$proj = Get-Content $csproj
+# csproj は BOM なしの UTF-8。PowerShell 5.1 は既定で ANSI (CP932) として読むので、
+# 日本語 (Debug の「andEmuera 開発版」) があると XML が壊れる
+[xml]$proj = Get-Content $csproj -Encoding utf8
 $displayVersion = $proj.SelectSingleNode('//PropertyGroup/ApplicationDisplayVersion').InnerText
 $versionCode    = $proj.SelectSingleNode('//PropertyGroup/ApplicationVersion').InnerText
 $appId          = $proj.SelectSingleNode('//PropertyGroup[not(@Condition)]/ApplicationId').InnerText
