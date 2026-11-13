@@ -39,6 +39,7 @@
 
 .EXAMPLE
     .\tools\deploy.ps1 -Build -Game D:\egame\era\erablue_resort -Launch
+    (開発版 rip.eragames.andemuera.debug を入れ、ゲームもそちらへ送る。配布版には触らない)
 
 .EXAMPLE
     .\tools\deploy.ps1 -Apk dist\andEmuera-0.8\andEmuera-0.8.apk
@@ -54,8 +55,12 @@ param(
     # 入れる APK。中にアセンブリを持たない Fast Deployment の APK は拒否する
     [string]$Apk,
 
-    # dotnet build -c Debug -t:Install でアプリを入れる (開発用)
+    # dotnet build -c Debug -t:Install でアプリを入れる (開発用)。
+    # 入るのは配布版と別の「andEmuera 開発版」(rip.eragames.andemuera.debug) で、ゲームもそちらへ送る
     [switch]$Build,
+
+    # -Build を付けずに、ゲームやフォントを開発版のほうへ送る
+    [switch]$DevApp,
 
     # 端末にすでにあるゲームにも sav/ を送る。端末の sav/ は先に PC へ控える
     [switch]$WithSave,
@@ -81,11 +86,15 @@ $ErrorActionPreference = 'Stop'
 $repo   = Split-Path -Parent $PSScriptRoot
 $csproj = Join-Path $repo 'src\andEmuera.Android\andEmuera.Android.csproj'
 
-# csproj から取れればそれを使う (配布 zip に入れた場合など、無くても動くように)
-$appId = 'rip.eragames.andemuera'
+# csproj から取れればそれを使う (配布 zip に入れた場合など、無くても動くように)。
+# 開発版 (Debug) は配布版と別のパッケージ名で入るので、-Build / -DevApp のときはそちらを相手にする
+if ($Apk -and $DevApp) { throw "-Apk (配布版) と -DevApp (開発版) は同時に指定できません。" }
+$useDevApp = $Build -or $DevApp
+$appId = if ($useDevApp) { 'rip.eragames.andemuera.debug' } else { 'rip.eragames.andemuera' }
 if (Test-Path $csproj) {
     [xml]$proj = Get-Content $csproj -Encoding utf8
-    $node = $proj.SelectSingleNode('//PropertyGroup/ApplicationId')
+    $xpath = if ($useDevApp) { "//PropertyGroup[contains(@Condition,'Debug')]/ApplicationId" } else { '//PropertyGroup[not(@Condition)]/ApplicationId' }
+    $node = $proj.SelectSingleNode($xpath)
     if ($node) { $appId = $node.InnerText }
 }
 
@@ -285,6 +294,7 @@ $Serial = $dev.Serial
 
 $model = (Invoke-Adb shell getprop ro.product.model).Trim()
 Write-Host "端末: $model ($Serial)" -ForegroundColor Cyan
+Write-Host ("相手: {0} ({1})" -f $(if ($useDevApp) { 'andEmuera 開発版' } else { 'andEmuera (配布版)' }), $appId)
 
 function Get-InstalledInfo {
     $dump = Invoke-Adb shell dumpsys package $appId

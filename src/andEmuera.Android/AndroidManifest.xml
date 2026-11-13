@@ -6,7 +6,7 @@
   -->
   <application android:allowBackup="true"
                android:icon="@mipmap/appicon"
-               android:label="@string/app_name"
+               android:label="${appLabel}"
                android:roundIcon="@mipmap/appicon_round"
                android:supportsRtl="true"
                android:usesCleartextTraffic="true"

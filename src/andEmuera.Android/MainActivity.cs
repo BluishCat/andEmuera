@@ -21,7 +21,7 @@ using System.Linq;
 namespace AndEmuera;
 
 [Activity(
-	Label = "@string/app_name",
+	// 名前は AndroidManifest.xml の application の label (Debug は「andEmuera 開発版」) を引き継ぐ
 	MainLauncher = true,
 	Theme = "@android:style/Theme.Material.NoActionBar",
 	ScreenOrientation = ScreenOrientation.Portrait,
