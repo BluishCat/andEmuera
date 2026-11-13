@@ -101,7 +101,7 @@ if (-not $SkipBuild) {
 [xml]$proj = Get-Content $csproj
 $displayVersion = $proj.SelectSingleNode('//PropertyGroup/ApplicationDisplayVersion').InnerText
 $versionCode    = $proj.SelectSingleNode('//PropertyGroup/ApplicationVersion').InnerText
-$appId          = $proj.SelectSingleNode('//PropertyGroup/ApplicationId').InnerText
+$appId          = $proj.SelectSingleNode('//PropertyGroup[not(@Condition)]/ApplicationId').InnerText
 if (-not $Version) { $Version = $displayVersion }
 
 Write-Host "andEmuera $Version (versionCode $versionCode)" -ForegroundColor Cyan

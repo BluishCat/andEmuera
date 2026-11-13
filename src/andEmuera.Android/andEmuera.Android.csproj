@@ -10,6 +10,8 @@
     <ApplicationVersion>9</ApplicationVersion>
     <ApplicationDisplayVersion>0.93</ApplicationDisplayVersion>
     <RootNamespace>AndEmuera</RootNamespace>
+    <!-- ホーム画面の名前 (AndroidManifest.xml の ${appLabel})。Debug は下で上書きする -->
+    <AndroidManifestPlaceholders>appLabel=andEmuera</AndroidManifestPlaceholders>
 
     <!--
       Emuera は識別子の解決やプラグイン機構でリフレクションを多用するため、
@@ -19,6 +21,18 @@
     <AndroidLinkMode>None</AndroidLinkMode>
     <!-- Release の既定は AOT だが、AOT はトリミング前提 (XA1030) なので上と両立しない -->
     <RunAOTCompilation>false</RunAOTCompilation>
+  </PropertyGroup>
+
+  <!--
+    Debug (開発用、tools/deploy.ps1 -Build) は配布版と別のアプリとして入れる。
+    パッケージ名が同じだと、Debug 署名と配布版の署名が違うため互いに上書きできず、
+    入れ替えるたびにアンインストール (= 端末のゲームとセーブが消える) が要る。
+    別のパッケージ名にしておけば、遊ぶほうは配布版 (自己更新が効く) のまま、
+    開発版を横に入れて試せる。ゲームの置き場も別 (Android/data/<パッケージ名>/files/games/)。
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <ApplicationId>rip.eragames.andemuera.debug</ApplicationId>
+    <AndroidManifestPlaceholders>appLabel=andEmuera 開発版</AndroidManifestPlaceholders>
   </PropertyGroup>
 
   <!--

@@ -227,7 +227,7 @@ USB デバッグを有効にした端末をつないで、ゲームフォルダ�
 アプリも一緒に入れられます。
 
 ```powershell
-# 開発中: Debug でビルドして入れる (dotnet build -t:Install)
+# 開発中: Debug でビルドして「andEmuera 開発版」を入れる (dotnet build -t:Install)
 .\tools\deploy.ps1 -Build -Game D:\egame\era\erablue_resort -Launch
 
 # 配布用の APK を入れる (adb install -r)
@@ -239,6 +239,13 @@ USB デバッグを有効にした端末をつないで、ゲームフォルダ�
 古い Debug APK を `adb install -r` したら、拒否された直後に adb がアンインストールして入れ直し、
 `files/` ごとゲームとセーブが消えたことがあるためです。`--no-incremental` も付けています。
 Debug は Fast Deployment でアセンブリを APK の外に置くこともあり、入れてもコードが古いまま動きます。
+
+**Debug ビルドは配布版と別のアプリ「andEmuera 開発版」（`rip.eragames.andemuera.debug`）として入ります。**
+Debug 署名と配布版の署名は違うので、同じパッケージ名だと互いに上書きできず、入れ替えるたびに
+アンインストール（＝端末のゲームとセーブが消える）が要るためです。遊ぶほうは配布版のまま（自己更新が効く）、
+開発版を横に入れて試せます。ゲームの置き場も別（`Android/data/rip.eragames.andemuera.debug/files/games/`）なので、
+`-Build` を付けると `-Game` も開発版へ送ります。ビルドし直さずに開発版へ送るときは `-DevApp` を付けます。
+かんたん転送は配布版だけを相手にします。
 
 ほかに `-Font <ttf>`（共有 `fonts/` へ）、`-Serial`（複数台つないでいるとき）があります。
 adb は PATH か Android SDK の `platform-tools` から探します。
