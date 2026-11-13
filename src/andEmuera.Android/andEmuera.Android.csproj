@@ -7,8 +7,8 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationId>rip.eragames.andemuera</ApplicationId>
-    <ApplicationVersion>11</ApplicationVersion>
-    <ApplicationDisplayVersion>0.95</ApplicationDisplayVersion>
+    <ApplicationVersion>12</ApplicationVersion>
+    <ApplicationDisplayVersion>0.96</ApplicationDisplayVersion>
     <RootNamespace>AndEmuera</RootNamespace>
     <!-- ホーム画面の名前 (AndroidManifest.xml の ${appLabel})。Debug は下で上書きする -->
     <AndroidManifestPlaceholders>appLabel=andEmuera</AndroidManifestPlaceholders>

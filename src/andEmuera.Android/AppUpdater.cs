@@ -395,8 +395,11 @@ sealed class AppUpdater
 		var param = new PackageInstaller.SessionParams(PackageInstallMode.FullInstall);
 		param.SetAppPackageName(activity.PackageName);
 		param.SetSize(new FileInfo(apk).Length);
-		// Android 12 以降は、自分で入れた版なら確認なしで入れ替えられることがある
-		// (adb で入れた版からの初回は確認画面が出る)
+		// Android 12 以降は、次の 3 つがそろうと Android の確認画面なしで入れ替わる:
+		//   - いま入っている版を入れたのがこのアプリ自身 (2 回目の自己更新から。adb やかんたん転送で入れた直後は確認が出る)
+		//   - いま入っている版が UPDATE_PACKAGES_WITHOUT_USER_ACTION を持つ (0.96 から。AndroidManifest.xml)
+		//   - ここで USER_ACTION_NOT_REQUIRED を頼む
+		// そろわないときは STATUS_PENDING_USER_ACTION が返り、InstallResultReceiver が確認画面を開く
 		if (OperatingSystem.IsAndroidVersionAtLeast(31))
 			param.SetRequireUserAction((int)PackageInstallUserAction.NotRequired);
 
