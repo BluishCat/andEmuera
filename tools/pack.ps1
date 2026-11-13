@@ -344,6 +344,12 @@ Google Play を通していないので、「提供元不明のアプリ」の�
 
 PC を使わない場合は、APK を端末へ転送してファイルアプリから開いてください。
 
+0.94 からは、アプリを起動したときに新しい版が出ていないか確かめます
+(GitHub の配布ページを見るだけで、ゲームやセーブはどこにも送りません)。
+新しい版があれば「更新する」で APK を落とし、Android の確認画面で「更新」を押すと
+入れ替わります。初回だけ「この提供元のアプリを許可」をオンにしてください。
+端末のゲームとセーブは消えません。「この版は入れない」を選ぶと、その版は知らせません。
+
 
 == 3. ゲームを手で入れる ==
 
@@ -422,6 +428,22 @@ $binZip = Join-Path $dist "andEmuera-$Version.zip"
 New-Zip -SourceDir $stageRoot -Destination $binZip
 Remove-Item $stageRoot -Recurse -Force
 
+# ---------------------------------------------------------------- アプリの自己更新用
+
+# アプリ (src/andEmuera.Android/AppUpdater.cs) は起動時にリリースの andEmuera-update.json を読み、
+# versionCode が端末より大きければ同じリリースの APK 単体を落として入れる。
+# スマホで zip を開かずに済むよう、APK は zip とは別にもリリースへ付ける。
+# かんたん転送だけのリリースでも付けてよい (versionCode が同じなのでアプリは知らせない)
+$apkAsset = Join-Path $dist "andEmuera-$Version.apk"
+Copy-Item $apk.FullName $apkAsset -Force
+$updateJson = Join-Path $dist 'andEmuera-update.json'
+$manifest = [ordered]@{
+    versionName = $Version
+    versionCode = [int]$versionCode
+    apk         = (Split-Path -Leaf $apkAsset)
+} | ConvertTo-Json -Compress
+[IO.File]::WriteAllText($updateJson, $manifest, (New-Object Text.UTF8Encoding $false))
+
 # ---------------------------------------------------------------- ソース zip
 
 $srcZip = Join-Path $dist "andEmuera-$Version-src.zip"
@@ -450,6 +472,7 @@ if (-not $SkipSource) {
 
 $zips = @($binZip)
 if (-not $SkipSource) { $zips += $srcZip }
+$zips += $apkAsset, $updateJson
 
 $lines = foreach ($z in $zips) {
     $hash = (Get-FileHash $z -Algorithm SHA256).Hash.ToLower()
@@ -465,4 +488,6 @@ foreach ($z in $zips) {
 Write-Host ""
 $lines | ForEach-Object { Write-Host "  $_" }
 Write-Host ""
+Write-Host "リリースには上の全部 (zip・APK・andEmuera-update.json) を付けてください。" -ForegroundColor Yellow
+Write-Host "  APK と json が無いと、端末のアプリは新しい版に気づけません。" -ForegroundColor Yellow
 Write-Host "次のリリースでは csproj の ApplicationVersion (今 $versionCode) を +1 してください。" -ForegroundColor Yellow

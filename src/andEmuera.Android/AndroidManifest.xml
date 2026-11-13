@@ -2,7 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <!--
     WebView は 127.0.0.1 のローカルサーバーへ平文 HTTP で繋ぐため cleartext を許可する。
-    外部への通信は行わない。
+    外部への通信は、起動時の更新確認 (AppUpdater.cs: api.github.com と GitHub のリリースファイル、
+    HTTPS) だけ。ゲームの中身やセーブは送らない。
   -->
   <application android:allowBackup="true"
                android:icon="@mipmap/appicon"
@@ -13,4 +14,6 @@
                android:hardwareAccelerated="true">
   </application>
   <uses-permission android:name="android.permission.INTERNET" />
+  <!-- 更新した APK を Android のインストーラーへ渡す (AppUpdater.cs) -->
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>
