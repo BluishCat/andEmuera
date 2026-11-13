@@ -16,4 +16,9 @@
   <uses-permission android:name="android.permission.INTERNET" />
   <!-- 更新した APK を Android のインストーラーへ渡す (AppUpdater.cs) -->
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+  <!--
+    Android 12 以降、自分で入れた版を自分で更新するときに確認画面を省く (AppUpdater.cs の Commit)。
+    ふつうの権限なので利用者に許可を求める画面は出ない。Android 11 以前では無視される
+  -->
+  <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 </manifest>

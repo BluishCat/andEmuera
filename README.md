@@ -165,8 +165,10 @@ java.lang.UnsatisfiedLinkError: No implementation found for void ...MainActivity
 - 「更新する」で APK 単体（`andEmuera-<版>.apk`）を落とし、大きさと API の `digest`（SHA-256）を確かめます。
   digest の無い APK は入れません。入っているアプリと署名が違えば（Debug 版など）、上書きできない理由を出して止めます
 - `PackageInstaller` のセッションで入れるので、Android の確認画面で「更新」を押せば入れ替わります。初回は
-  「この提供元のアプリを許可」（`REQUEST_INSTALL_PACKAGES`）をオンにしてもらいます。Android 12 以降は
-  `USER_ACTION_NOT_REQUIRED` を付けているので、アプリ自身が入れた版からの更新は確認なしで済むことがあります
+  「この提供元のアプリを許可」（`REQUEST_INSTALL_PACKAGES`）をオンにしてもらいます
+- Android 12 以降は、**入っている版をアプリ自身が入れていて**、その版が `UPDATE_PACKAGES_WITHOUT_USER_ACTION`
+  （0.96〜）を持っていれば、`USER_ACTION_NOT_REQUIRED` で確認画面なしに入れ替わります。adb やかんたん転送で入れた直後の
+  1 回は確認画面が出ます。Google Play プロテクトの「スキャンをおすすめします」は Play ストア側の判断なので、出ることがあります
 - Debug ビルド（開発版）は確かめません
 - 通信先は `api.github.com` と GitHub のリリースファイル置き場だけです。ゲームの中身やセーブは送りません
 
